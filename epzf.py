@@ -5,10 +5,26 @@ import sympy as sp
 from math import comb
 from tqdm import tqdm
 import time
+import itertools
 
-n=8 #Size of the graph. Many functions depend on this.
-targetGraph = nx.lollipop_graph(4,n-4) #graph is created here.
+n=5 #Size of the graph. Many functions depend on this.
+targetGraph = nx.path_graph(n) #graph is created here.
 zeroForcingSetSize = 1 #size of the zero forcing set
+
+def largerBin(num): #Given a decimal integer, retunrs all possible states that it can reach in one iteration
+    nums = []
+    binary = d2b(num)
+    zeroIndices = []
+    for i in range(len(binary)):
+        if binary[i] == "0":
+            zeroIndices.append(n-i-1) 
+    for i in range(len(zeroIndices)+1):
+        for subset in itertools.combinations(zeroIndices, i):
+            temp = num
+            for j in subset:
+                temp += 2**j
+            nums.append(temp)
+    return sorted(nums)
 
 def extract(lst):
     return [item[0] for item in lst]
@@ -18,6 +34,8 @@ def d2b(i): #Function to return the string of the binary representation of an in
     while(len(binaryString) < n):
         binaryString = "0" + binaryString
     return binaryString
+
+print(largerBin(13))
 
 def b2d(bin): #Function to return the decimal represenation of a binary number
     dec = 0
@@ -102,9 +120,9 @@ def graph_gen(targetGraph):
     return graphs
 
 def tm_generation(graphs):
+    start = time.process_time()
     tm = np.zeros([2**n,2**n])
     #The states of the transition matrix is stored as follows - the nth node being blue refers to a 1 in the nth digit of the binary expression of the state.
-
     for i in range(2**n): #Computing the transition rate matrix
         for j in range(2**n):
             stateigraph = graphs[i]
@@ -122,8 +140,12 @@ def tm_generation(graphs):
                         tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
                     transitionCalculated = True
     tm[2**n-1][2**n-1] = 1
-    print("Transition Matrix Generation Complete")
+    print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm
+
+def tm_generation_sub(startingSetDec):
+    states = largerBin(startingSetDec)
+    numStates = len(states)
 
 """
 #sanity check
@@ -136,9 +158,8 @@ for i in range(2**n):
 print(rowSums)
 """
 
-def propogation_time_solver(tm):
+def propogation_time_solver(tm): #Turns out this one is really slow. Use the other one!
     #Solving the system of equations to find expected number of steps until absorption
-    start = time.process_time()
     mus = sp.symbols('mu0:%d'%2**n)
     a = sp.Matrix(tm)
     eqns = []
@@ -148,7 +169,45 @@ def propogation_time_solver(tm):
         else:
             eqns.append(a.row(i).dot(mus))
     ans = list(sp.linsolve(eqns[-(2**n-1):], mus[-(2**n-1):])) #Has no value for the empty starting set
-    print("Time needed for finding expected propogation time = " + str(time.process_time() - start) + " seconds")
+    return ans
+
+def propogation_time_solver_2(tm):
+    #Solving the system of equations without using sympy
+    solutions = np.zeros(2**n) #Rewrite to solve from bottom to top, 
+    needs_to_be_calculated = list(range(1,2**n-1))
+    while len(needs_to_be_calculated) > 0:
+        for i in needs_to_be_calculated:
+            if can_be_calculated(tm, i, solutions):
+                temp = calc_expected(tm, i, solutions)
+                solutions[i] = temp
+                needs_to_be_calculated.remove(i)
+    return solutions
+
+def propogation_time_solver_3(tm):
+    #The fastest one
+    solutions = np.zeros(2**n)
+    solutions[2**n-1] = 0
+    for i in range(2**n-2, 0, -1):
+        temp = calc_expected(tm, i, solutions)
+        solutions[i] = temp
+    return solutions
+
+def calc_expected(tm, row, solutions):
+    temp = 0
+    coefficient = 1-tm[row][row]
+    for i in range(row+1, 2**n):
+        temp+= tm[row][i] * (solutions[i]+1)
+    temp+= (1-coefficient)
+    temp /= coefficient
+    return temp
+
+
+def can_be_calculated(tm, row, solutions):
+    ans = True
+    for i in range(2**n-1):
+        if tm[row][i] != 0:
+            if solutions[i] == 0 and i != row:
+                ans = False
     return ans
 
 #generating arrays for zero forcing sets by size of intial set
@@ -190,7 +249,26 @@ def save_zfs(num, title):
                 
 graphs = graph_gen(targetGraph)
 transitionMatrix = tm_generation(graphs)
+
+"""
 emptyZeroForcingSetVal = tuple("0")
+start = time.process_time()
 transitionTimesFixed = emptyZeroForcingSetVal + (propogation_time_solver(transitionMatrix)[0])
+print("Time needed for old algorithm = " + str(time.process_time() - start) + " seconds")
+
+start = time.process_time()
+transitionTimesFixed = propogation_time_solver_2(transitionMatrix)
+print("Time needed for calculating expected forcing time = " + str(time.process_time() - start) + " seconds")
+print(transitionTimesFixed)
+"""
+
+start = time.process_time()
+transitionTimesFixed = propogation_time_solver_3(transitionMatrix)
+print("Time needed for NEW calculating expected forcing time = " + str(time.process_time() - start) + " seconds")
+print(transitionTimesFixed)
+
+
+"""
 optimalSol = optimal_zfs_by_size(transitionTimesFixed, zeroForcingSetSize)
 print_zfs((optimalSol[0])[0])
+"""
