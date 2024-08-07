@@ -8,18 +8,6 @@ from collections import defaultdict
 import time
 import itertools
 
-
-#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
-
-#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
-
-#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
-
-#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
-
-#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
-
-
 def largerBin_old(num): #Given a decimal integer, returns a supersetof all possible states that it can reach in one iteration
     nums = []
     binary = d2b(num)
@@ -334,7 +322,7 @@ def save_zfs(num, title, transitionTimes):
     plt.savefig(title)
 
 def return_automorphic_states(graphs, index):
-    degSeq = tuple(blue_degree_sequence(graphs,index),)
+    degSeq = tuple(blue_degree_sequence(graphs,index))
     ans = []
     for state in blueDegSeqGroups[degSeq]: #Checking all other graphs with the same number of blue nodes
         if nx.is_isomorphic(graphs[index], graphs[state], node_match=color_match):
