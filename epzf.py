@@ -4,14 +4,23 @@ import numpy as np
 import sympy as sp
 from math import comb
 from tqdm import tqdm
+from collections import defaultdict
 import time
 import itertools
 
-n=5 #Size of the graph. Many functions depend on this.
-targetGraph = nx.path_graph(n) #graph is created here.
-zeroForcingSetSize = 1 #size of the zero forcing set
 
-def largerBin(num): #Given a decimal integer, retunrs all possible states that it can reach in one iteration
+#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
+
+#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
+
+#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
+
+#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
+
+#FIX LARGERBIN TO CONSIDER EDGES! THIS COULD BE MUCH FASTER!!!
+
+
+def largerBin_old(num): #Given a decimal integer, returns a supersetof all possible states that it can reach in one iteration
     nums = []
     binary = d2b(num)
     zeroIndices = []
@@ -26,6 +35,44 @@ def largerBin(num): #Given a decimal integer, retunrs all possible states that i
             nums.append(temp)
     return sorted(nums)
 
+def largerBin(num, graphs): #This one checks the edges for possibilities first. Gives all possible states that it can reach in one iteration
+    nums = []
+    binary = d2b(num)
+    blueIndices = []
+    whiteIndices = []
+    possibleIndices = []
+    for i in range(len(binary)):
+        if binary[i] == "0":
+            whiteIndices.append(n-i-1)
+        else:
+            blueIndices.append(n-i-1)
+    for i in whiteIndices:
+        if len(set(blueNeighbors(graphs[num], i)).intersection(set(blueIndices))) > 0:
+            possibleIndices.append(i)
+    for i in range(len(possibleIndices)+1):
+        for subset in itertools.combinations(possibleIndices, i):
+            temp = num
+            for j in subset:
+                temp+= 2**j
+            nums.append(temp)
+    return sorted(nums)
+
+def sameOnes(num): #Given a decimal integer, returns all other numbers with the same number of 1 bits. 
+    ones = bin(num).count("1")
+    ans = []
+    for i in range(2**n):
+        if bin(i).count("1") == ones:
+            ans.append(i)
+    return ans
+
+def sameOnes_larger(num):
+    ones = bin(num).count("1")
+    ans = []
+    for i in range(num, 2**n):
+        if bin(i).count("1") == ones:
+            ans.append(i)
+    return ans
+
 def extract(lst):
     return [item[0] for item in lst]
 
@@ -34,8 +81,6 @@ def d2b(i): #Function to return the string of the binary representation of an in
     while(len(binaryString) < n):
         binaryString = "0" + binaryString
     return binaryString
-
-print(largerBin(13))
 
 def b2d(bin): #Function to return the decimal represenation of a binary number
     dec = 0
@@ -119,7 +164,7 @@ def graph_gen(targetGraph):
     print("Time needed for graph creation = " + str(time.process_time() - start) + " seconds")
     return graphs
 
-def tm_generation(graphs):
+def tm_generation_old(graphs): #outdated, quite slow
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     #The states of the transition matrix is stored as follows - the nth node being blue refers to a 1 in the nth digit of the binary expression of the state.
@@ -143,10 +188,40 @@ def tm_generation(graphs):
     print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm
 
-def tm_generation_sub(startingSetDec):
-    states = largerBin(startingSetDec)
-    numStates = len(states)
+def tm_generation(graphs):
+    start = time.process_time()
+    tm = np.zeros([2**n,2**n])
+    #The states of the transition matrix is stored as follows - the nth node being blue refers to a 1 in the nth digit of the binary expression of the state.
+    for i in tqdm(range(2**n)): #Computing the transition rate matrix
+        for j in largerBin(i, graphs):
+            stateigraph = graphs[i]
+            numBlueNeighborsi = numBlueNeighbors(stateigraph)
+            tm[i][j] = 1
+            for k in differingDigits(i, j): #all differing digits must go from 0 to 1, otherwise transition impossible. First consdiering probabilities of vertices being forced
+                tm[i][j] *= forcedProb(stateigraph, k, numBlueNeighborsi)
+            for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!)
+                tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
+    tm[2**n-1][2**n-1] = 1
+    print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
+    return tm
 
+def tm_generation_sub(graphs, startingSet):
+    start = time.process_time()
+    tm = np.zeros([2**n,2**n])
+    states = largerBin(startingSet, graphs)
+    for i in tqdm(states):
+        for j in largerBin(i, graphs):
+            stateigraph = graphs[i]
+            numBlueNeighborsi = numBlueNeighbors(stateigraph)
+            tm[i][j] = 1
+            for k in differingDigits(i, j): #all differing digits must go from 0 to 1, otherwise transition impossible. First consdiering probabilities of vertices being forced
+                tm[i][j] *= forcedProb(stateigraph, k, numBlueNeighborsi)
+            for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!)
+                tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
+    tm[2**n-1][2**n-1] = 1
+    subtm = tm[np.ix_(states, states)]
+    print("Time needed for Transition Matrix Generation with submatrix of size " + str(len(states)) + " in " + str(time.process_time() - start) + " seconds")
+    return subtm
 """
 #sanity check
 rowSums = np.zeros(2**n)
@@ -157,7 +232,6 @@ for i in range(2**n):
     rowSums[i] = sum
 print(rowSums)
 """
-
 def propogation_time_solver(tm): #Turns out this one is really slow. Use the other one!
     #Solving the system of equations to find expected number of steps until absorption
     mus = sp.symbols('mu0:%d'%2**n)
@@ -184,23 +258,35 @@ def propogation_time_solver_2(tm):
     return solutions
 
 def propogation_time_solver_3(tm):
+    start = time.process_time()
+    size = len(tm)
     #The fastest one
-    solutions = np.zeros(2**n)
-    solutions[2**n-1] = 0
-    for i in range(2**n-2, 0, -1):
+    solutions = np.zeros(size)
+    solutions[size-1] = 0
+    for i in range(size-2, -1, -1):
         temp = calc_expected(tm, i, solutions)
         solutions[i] = temp
+    print("Solving for propogation time took " + str(time.process_time() - start) + " seconds")
     return solutions
 
+def propogation_time_solver_4(tm): #This one uses the linalg method outlined in Hogben and Jesse's paper. It's Slow :(
+    size = len(tm)
+    for row in tm:
+        row[-1] -= 1
+    start = time.process_time()
+    temp = np.linalg.inv(tm-np.identity(size))
+    print("Finding an inverse took " + str(time.process_time() - start) + " seconds")
+    return temp[0][size-1] + 1
+
 def calc_expected(tm, row, solutions):
+    size = len(tm)
     temp = 0
     coefficient = 1-tm[row][row]
-    for i in range(row+1, 2**n):
+    for i in range(row+1, size):
         temp+= tm[row][i] * (solutions[i]+1)
     temp+= (1-coefficient)
     temp /= coefficient
     return temp
-
 
 def can_be_calculated(tm, row, solutions):
     ans = True
@@ -224,18 +310,18 @@ def optimal_zfs_by_size(ptimes, size):
             solutions.append((i, min))
     return solutions #returns list with two elements. first element contains all zfs that achieve the min time, second elment is the min time
 
-def print_zfs(num):
+def print_zfs(num, transitionTimes):
     color_map = []
     for i in range(n):
         if graphs[num].nodes[i]['color'] == 'blue':
             color_map.append('blue')
         else: 
             color_map.append('white')      
-    plt.title("Expected Propogation Time = " + str(transitionTimesFixed[num]))
+    plt.title("Expected Propogation Time = " + str(transitionTimes[num]))
     nx.draw(targetGraph, node_color=color_map, with_labels=True)
     plt.show()
 
-def save_zfs(num, title):
+def save_zfs(num, title, transitionTimes):
     color_map = []
     for i in range(n):
         if graphs[num].nodes[i]['color'] == 'blue':
@@ -243,32 +329,135 @@ def save_zfs(num, title):
         else: 
             color_map.append('white')  
     plt.figure()    
-    plt.title("Expected Propogation Time = " + str(transitionTimesFixed[num]))
+    plt.title("Expected Propogation Time = " + str(transitionTimes[num]))
     nx.draw(targetGraph, node_color=color_map, with_labels=True)
     plt.savefig(title)
-                
-graphs = graph_gen(targetGraph)
+
+def return_automorphic_states(graphs, index):
+    degSeq = tuple(blue_degree_sequence(graphs,index),)
+    ans = []
+    for state in blueDegSeqGroups[degSeq]: #Checking all other graphs with the same number of blue nodes
+        if nx.is_isomorphic(graphs[index], graphs[state], node_match=color_match):
+            ans.append(state)
+    return ans
+
+def automorphism_groups(graphs):
+    start = time.process_time()
+    states = range(2**n)
+    groups = []
+    while len(states) > 0:
+        group = return_automorphic_states(graphs, states[0])
+        groups.append(group)
+        states = [item for item in states if item not in group]
+    print("Time needed to generate automorphism groups " + str(time.process_time() - start) + " seconds")
+    return groups
+
+def color_match(n1, n2):
+    return n1['color'] == n2['color']
+
+def blue_degree_sequence(graphs, index): #Returns the degree sequence of the blue nodes within a graph.
+    seq = []
+    graph = graphs[index]
+    for v in graph.nodes:
+        if graph.nodes[v]['color'] == 'blue':
+            seq.append(graph.degree[v])
+    seq.sort(reverse=True)
+    return seq
+
+def blue_degree_sequence_groups(graphs):
+    groups = defaultdict(list)
+    for i in range(2**n):
+        degSeq = tuple(blue_degree_sequence(graphs,i))
+        groups[degSeq].append(i)
+    return groups
+
+def degree_sequence_groups(graphs):
+    groups = defaultdict(list)
+    for i in range(2**n):
+        degseq = tuple(blue_degree_sequence(graphs,i), white_degree_sequence(graphs,i))
+        groups[degseq].append(i)
+    return groups
+
+def white_degree_sequence(graphs, index):
+    seq = []
+    graph = graphs[index]
+    for v in graph.nodes:
+        if graph.nodes[v]['color'] == 'white':
+            seq.append(graph.degree[v])
+    seq.sort(reverse=True)
+    return seq
+
+def white_degree_sequence_groups(graphs):
+    groups = defaultdict(list)
+    for i in range(2**n):
+        degSeq = tuple(white_degree_sequence(graphs,i))
+        groups[degSeq].append(i)
+    return groups
+
+def generate_automorphism_graph(automorphism_groups):
+    return 0
+
+def generate_automorphism_matrix(automorphism_groups, graphs):
+    start = time.process_time()
+    numStates = len(automorphism_groups)
+    matrix = np.zeros([numStates,numStates])
+    matrix[0][0] = 1
+    for i in tqdm(range(numStates)):
+        startingState = (automorphism_groups[i])[0]
+        startingStateGraph = graphs[startingState]
+        possibleStates = largerBin(startingState, graphs)
+        numBlueNeighborsStartingState = numBlueNeighbors(startingStateGraph)
+        for j in range(i, numStates):
+            prob = 0
+            targetGroup = automorphism_groups[j]
+            transitionPossibleSet = sorted(list(set(possibleStates).intersection(set(targetGroup))))
+            for graphState in transitionPossibleSet:
+                temp = 1
+                for k in differingDigits(startingState, graphState): #all differing digits (nodes) must go from 0 to 1, otherwise transition impossible. First consdiering probabilities of vertices being forced
+                    probability = forcedProb(startingStateGraph, k, numBlueNeighborsStartingState)
+                    temp *= probability
+                for m in sameZeros(startingState,graphState): #all 0s that stay as 0s must not have been forced!)
+                    temp *= (1-forcedProb(startingStateGraph, m, numBlueNeighborsStartingState))
+                prob += temp
+            matrix[i][j] = prob
+    print("Time needed to generate automorphism transition matrix " + str(time.process_time() - start) + " seconds")
+    return matrix
+
+def calculate_transition_probability(startingGraph, startingGraphIndex, endingGraphIndex):
+    needToBeForced = differingDigits(startingGraphIndex, endingGraphIndex) #vertices that need to be forced
+    needToStayUnforced = sameZeros(startingGraphIndex, endingGraphIndex) #vertices that need to stay unforced
+    temp = 1
+    for vertex in needToBeForced:
+        temp =1
+    return temp
+
+targetGraph = nx.cycle_graph(14) #graph is created here.
+n = targetGraph.number_of_nodes()
+zeroForcingSetSize = 1 #size of the zero forcing set
+graphs = graph_gen(targetGraph) #array of graphs, contains every single possible state
+blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state
+"""
 transitionMatrix = tm_generation(graphs)
+transitionTimes = propogation_time_solver_3(transitionMatrix)
+print(transitionTimes)
+"""
+automorphismGroups = automorphism_groups(graphs)[1:]
+automorphismMatrix = generate_automorphism_matrix(automorphismGroups, graphs)
+automorphicTransitionTimes = propogation_time_solver_3(automorphismMatrix)
+
+
 
 """
-emptyZeroForcingSetVal = tuple("0")
 start = time.process_time()
-transitionTimesFixed = emptyZeroForcingSetVal + (propogation_time_solver(transitionMatrix)[0])
-print("Time needed for old algorithm = " + str(time.process_time() - start) + " seconds")
-
-start = time.process_time()
-transitionTimesFixed = propogation_time_solver_2(transitionMatrix)
-print("Time needed for calculating expected forcing time = " + str(time.process_time() - start) + " seconds")
-print(transitionTimesFixed)
+for i in automorphism_groups(graphs):
+    print(i)
+    print(transitionTimes[i[0]])
+print("Time needed for algebraic epzf solving = " + str(time.process_time() - start) + " seconds")
 """
-
-start = time.process_time()
-transitionTimesFixed = propogation_time_solver_3(transitionMatrix)
-print("Time needed for NEW calculating expected forcing time = " + str(time.process_time() - start) + " seconds")
-print(transitionTimesFixed)
-
 
 """
 optimalSol = optimal_zfs_by_size(transitionTimesFixed, zeroForcingSetSize)
 print_zfs((optimalSol[0])[0])
 """
+
+#next steps, symmetric graphs, cut edges
