@@ -220,7 +220,7 @@ for i in range(2**n):
     rowSums[i] = sum
 print(rowSums)
 """
-def propogation_time_solver(tm): #Turns out this one is really slow. Use the other one!
+def propogation_time_solver_algebraic(tm): #Turns out this one is really slow. Use the other one!
     #Solving the system of equations to find expected number of steps until absorption
     mus = sp.symbols('mu0:%d'%2**n)
     a = sp.Matrix(tm)
@@ -233,19 +233,7 @@ def propogation_time_solver(tm): #Turns out this one is really slow. Use the oth
     ans = list(sp.linsolve(eqns[-(2**n-1):], mus[-(2**n-1):])) #Has no value for the empty starting set
     return ans
 
-def propogation_time_solver_2(tm):
-    #Solving the system of equations without using sympy
-    solutions = np.zeros(2**n) #Rewrite to solve from bottom to top, 
-    needs_to_be_calculated = list(range(1,2**n-1))
-    while len(needs_to_be_calculated) > 0:
-        for i in needs_to_be_calculated:
-            if can_be_calculated(tm, i, solutions):
-                temp = calc_expected(tm, i, solutions)
-                solutions[i] = temp
-                needs_to_be_calculated.remove(i)
-    return solutions
-
-def propogation_time_solver_3(tm):
+def propogation_time_solver(tm):
     start = time.process_time()
     size = len(tm)
     #The fastest one
@@ -321,23 +309,36 @@ def save_zfs(num, title, transitionTimes):
     nx.draw(targetGraph, node_color=color_map, with_labels=True)
     plt.savefig(title)
 
-def return_automorphic_states(graphs, index):
-    degSeq = tuple(blue_degree_sequence(graphs,index))
+def return_automorphic_states(graphs,index,automorphicKeys):
+    key = tuple(blue_degree_sequence(graphs, index)) + tuple(sorted(numBlueNeighbors(graphs[index])))
     ans = []
-    for state in blueDegSeqGroups[degSeq]: #Checking all other graphs with the same number of blue nodes
+    for state in automorphicKeys[key]:
         if nx.is_isomorphic(graphs[index], graphs[state], node_match=color_match):
             ans.append(state)
+            global succesfulChecks
+            succesfulChecks += 1
+        else:
+            global failedChecks
+            failedChecks += 1
     return ans
 
 def automorphism_groups(graphs):
     start = time.process_time()
+    automorphicKeys = pre_automorphism_checking_dictionary(graphs)
     states = range(2**n)
     groups = []
-    while len(states) > 0:
-        group = return_automorphic_states(graphs, states[0])
+    while len(states) > 0: 
+        group = return_automorphic_states(graphs,states[0], automorphicKeys)
         groups.append(group)
         states = [item for item in states if item not in group]
     print("Time needed to generate automorphism groups " + str(time.process_time() - start) + " seconds")
+    return groups
+
+def pre_automorphism_checking_dictionary(graphs): #this one creates a dictionary of all things to check before checking for automorphisms
+    groups = defaultdict(list)
+    for i in range(2**n):
+        key = tuple(blue_degree_sequence(graphs, i)) + tuple(sorted(numBlueNeighbors(graphs[i])))
+        groups[key].append(i)
     return groups
 
 def color_match(n1, n2):
@@ -362,9 +363,23 @@ def blue_degree_sequence_groups(graphs):
 def degree_sequence_groups(graphs):
     groups = defaultdict(list)
     for i in range(2**n):
-        degseq = tuple(blue_degree_sequence(graphs,i), white_degree_sequence(graphs,i))
+        degseq = tuple(blue_then_white_degree_sequence(graphs,i))
         groups[degseq].append(i)
     return groups
+
+def blue_then_white_degree_sequence(graphs, index):
+    blueSeq = []
+    whiteSeq = []
+    graph = graphs[index]
+    for v in graph.nodes:
+        if graph.nodes[v]['color'] == 'blue':
+            blueSeq.append(graph.degree[v])
+        else:
+            whiteSeq.append(graph.degree[v])
+    blueSeq.sort(reverse=True)
+    whiteSeq.sort(reverse=True)
+    #the zero acts as the split
+    return tuple(blueSeq), tuple(whiteSeq)
 
 def white_degree_sequence(graphs, index):
     seq = []
@@ -381,9 +396,6 @@ def white_degree_sequence_groups(graphs):
         degSeq = tuple(white_degree_sequence(graphs,i))
         groups[degSeq].append(i)
     return groups
-
-def generate_automorphism_graph(automorphism_groups):
-    return 0
 
 def generate_automorphism_matrix(automorphism_groups, graphs):
     start = time.process_time()
@@ -419,20 +431,57 @@ def calculate_transition_probability(startingGraph, startingGraphIndex, endingGr
         temp =1
     return temp
 
-targetGraph = nx.cycle_graph(14) #graph is created here.
+def generate_automorphism_graph(automorphism_groups):
+    return 0
+
+def transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize): #so far only works with one node
+    maxClique = nx.approximation.max_clique(targetGraph)
+    cliqueTransitionTimeAvg = 0
+    nonCliqueTransitionTimeAvg = 0
+    sets = numswithbitcount(2**n, zeroForcingSetSize)
+    cliqueNodeSets = list(itertools.combinations(maxClique, zeroForcingSetSize))
+    cliqueSets = []
+    for i in cliqueNodeSets:
+        temp = 0
+        for j in i:
+            temp += 2**j
+        cliqueSets.append(temp)
+    for i in sets:
+        if i in cliqueSets:
+            cliqueTransitionTimeAvg += transitionTimes[i]
+        else:
+            nonCliqueTransitionTimeAvg += transitionTimes[i]
+    cliqueTransitionTimeAvg /= len(cliqueSets)
+    nonCliqueTransitionTimeAvg /= (len(sets)-len(cliqueSets))
+    print("The average transition time average with the starting node being in the maxclique (size " + str(len(maxClique)) + ") is " + str(cliqueTransitionTimeAvg) + " iterations")
+    print("The average transition time average with the starting node not being in the maxclique is " + str(nonCliqueTransitionTimeAvg) + " iterations")
+
+
+
+targetGraph = nx.barbell_graph(5,4) #graph is created here.   #cycle 14 takes 1k seconds for auto groups and 1 to 2 secs for trans matrix
 n = targetGraph.number_of_nodes()
-zeroForcingSetSize = 1 #size of the zero forcing set
+zeroForcingSetSize = 2 #size of the zero forcing set
 graphs = graph_gen(targetGraph) #array of graphs, contains every single possible state
 blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state
-"""
 transitionMatrix = tm_generation(graphs)
-transitionTimes = propogation_time_solver_3(transitionMatrix)
-print(transitionTimes)
+transitionTimes = propogation_time_solver(transitionMatrix)
+startingSets = numswithbitcount(2**n, zeroForcingSetSize)
+print(transitionTimes[startingSets])
+transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize)
+
+
 """
+succesfulChecks = 0
+failedChecks = 0
 automorphismGroups = automorphism_groups(graphs)[1:]
 automorphismMatrix = generate_automorphism_matrix(automorphismGroups, graphs)
-automorphicTransitionTimes = propogation_time_solver_3(automorphismMatrix)
+automorphicTransitionTimes = propogation_time_solver(automorphismMatrix)
+print(automorphicTransitionTimes)
+print(succesfulChecks)
+print(failedChecks)
+"""
 
+#Compare values in automorphism transition times and regular transition times
 
 
 """
