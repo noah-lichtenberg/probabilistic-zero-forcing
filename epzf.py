@@ -7,6 +7,7 @@ from tqdm import tqdm
 from collections import defaultdict
 import time
 import itertools
+import random
 
 def largerBin_old(num): #Given a decimal integer, returns a supersetof all possible states that it can reach in one iteration
     nums = []
@@ -43,6 +44,29 @@ def largerBin(num, graphs): #This one checks the edges for possibilities first. 
             for j in subset:
                 temp+= 2**j
             nums.append(temp)
+    return sorted(nums)
+
+def largerBin_directed_newRule(num, graphs):
+    nums = []
+    binary = d2b(num)
+    blueIndices = []
+    whiteIndices = []
+    possibleIndices = []
+    for i in range(len(binary)):
+        if binary[i] == "0":
+            whiteIndices.append(n-i-1)
+        else:
+            blueIndices.append(n-i-1)
+    for i in blueIndices:
+        for j in graphs[num].successors(i):
+            if j not in blueIndices and j not in possibleIndices:
+                possibleIndices.append(j)
+    for i in range(len(possibleIndices)+1):
+        for subset in itertools.combinations(possibleIndices, i):
+            temp = num
+            for j in subset:
+                temp+= 2**j
+            nums.append(temp)        
     return sorted(nums)
 
 def sameOnes(num): #Given a decimal integer, returns all other numbers with the same number of 1 bits. 
@@ -138,6 +162,7 @@ def print_graph(graph):
 
 def graph_gen(targetGraph):
     start = time.process_time()
+    n = targetGraph.number_of_nodes()
     numGraphs = 2**n
     graphs = [None]*(numGraphs)
     for i in range(numGraphs):
@@ -149,7 +174,7 @@ def graph_gen(targetGraph):
             else:
                 graph.nodes[j]['color'] = "white"
         graphs[i] = graph
-    print("Time needed for graph creation = " + str(time.process_time() - start) + " seconds")
+    #print("Time needed for graph creation = " + str(time.process_time() - start) + " seconds")
     return graphs
 
 def tm_generation_old(graphs): #outdated, quite slow
@@ -173,14 +198,14 @@ def tm_generation_old(graphs): #outdated, quite slow
                         tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
                     transitionCalculated = True
     tm[2**n-1][2**n-1] = 1
-    print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
+    #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm
 
 def tm_generation(graphs):
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     #The states of the transition matrix is stored as follows - the nth node being blue refers to a 1 in the nth digit of the binary expression of the state.
-    for i in tqdm(range(2**n)): #Computing the transition rate matrix
+    for i in range(2**n): #Computing the transition rate matrix, tqdm here
         for j in largerBin(i, graphs):
             stateigraph = graphs[i]
             numBlueNeighborsi = numBlueNeighbors(stateigraph)
@@ -190,14 +215,22 @@ def tm_generation(graphs):
             for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!)
                 tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
     tm[2**n-1][2**n-1] = 1
-    print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
+    #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
+    return tm
+
+def tm_generation_directed(graphs):
+    start = time.process_time()
+    tm = np.zeros([2**n,2**n])
+    for i in range(2**n):
+        for j in largerBin(i, graphs):
+            temp = 0 #KEEP WRITING HERE!!
     return tm
 
 def tm_generation_sub(graphs, startingSet):
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     states = largerBin(startingSet, graphs)
-    for i in tqdm(states):
+    for i in states: #tqdm here
         for j in largerBin(i, graphs):
             stateigraph = graphs[i]
             numBlueNeighborsi = numBlueNeighbors(stateigraph)
@@ -208,7 +241,7 @@ def tm_generation_sub(graphs, startingSet):
                 tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
     tm[2**n-1][2**n-1] = 1
     subtm = tm[np.ix_(states, states)]
-    print("Time needed for Transition Matrix Generation with submatrix of size " + str(len(states)) + " in " + str(time.process_time() - start) + " seconds")
+    #print("Time needed for Transition Matrix Generation with submatrix of size " + str(len(states)) + " in " + str(time.process_time() - start) + " seconds")
     return subtm
 """
 #sanity check
@@ -242,7 +275,7 @@ def propogation_time_solver(tm):
     for i in range(size-2, -1, -1):
         temp = calc_expected(tm, i, solutions)
         solutions[i] = temp
-    print("Solving for propogation time took " + str(time.process_time() - start) + " seconds")
+    #print("Solving for propogation time took " + str(time.process_time() - start) + " seconds")
     return solutions
 
 def propogation_time_solver_4(tm): #This one uses the linalg method outlined in Hogben and Jesse's paper. It's Slow :(
@@ -251,7 +284,7 @@ def propogation_time_solver_4(tm): #This one uses the linalg method outlined in 
         row[-1] -= 1
     start = time.process_time()
     temp = np.linalg.inv(tm-np.identity(size))
-    print("Finding an inverse took " + str(time.process_time() - start) + " seconds")
+    #print("Finding an inverse took " + str(time.process_time() - start) + " seconds")
     return temp[0][size-1] + 1
 
 def calc_expected(tm, row, solutions):
@@ -431,10 +464,8 @@ def calculate_transition_probability(startingGraph, startingGraphIndex, endingGr
         temp =1
     return temp
 
-def generate_automorphism_graph(automorphism_groups):
-    return 0
-
-def transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize): #so far only works with one node
+def transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize): #currently breaks for complete graphs
+    n = targetGraph.number_of_nodes()
     maxClique = nx.approximation.max_clique(targetGraph)
     cliqueTransitionTimeAvg = 0
     nonCliqueTransitionTimeAvg = 0
@@ -453,11 +484,55 @@ def transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSi
             nonCliqueTransitionTimeAvg += transitionTimes[i]
     cliqueTransitionTimeAvg /= len(cliqueSets)
     nonCliqueTransitionTimeAvg /= (len(sets)-len(cliqueSets))
-    print("The average transition time average with the starting node being in the maxclique (size " + str(len(maxClique)) + ") is " + str(cliqueTransitionTimeAvg) + " iterations")
-    print("The average transition time average with the starting node not being in the maxclique is " + str(nonCliqueTransitionTimeAvg) + " iterations")
+    return cliqueTransitionTimeAvg, nonCliqueTransitionTimeAvg
+    #print("The average transition time average with the starting node being in the maxclique (size " + str(len(maxClique)) + ") is " + str(cliqueTransitionTimeAvg) + " iterations")
+    #print("The average transition time average with the starting node not being in the maxclique is " + str(nonCliqueTransitionTimeAvg) + " iterations")
+
+def transition_times_by_maxclique_minimum(targetGraph, transitionTimes, zeroForcingSetSize): #currently breaks for complete graphs
+    n = targetGraph.number_of_nodes()
+    maxClique = nx.approximation.max_clique(targetGraph)
+    cliqueTransitionTimeAvg = 0
+    nonCliqueTransitionTimeAvg = 0
+    sets = numswithbitcount(2**n, zeroForcingSetSize)
+    cliqueNodeSets = list(itertools.combinations(maxClique, zeroForcingSetSize))
+    cliqueSets = []
+    for i in cliqueNodeSets:
+        temp = 0
+        for j in i:
+            temp += 2**j
+        cliqueSets.append(temp)
+    min_index = min(sets, key=lambda i: transitionTimes[i])
+    min_value = transitionTimes[min_index]
+    if min_index in cliqueSets:
+        return True
+    else:
+        return False
+    #print("The average transition time average with the starting node being in the maxclique (size " + str(len(maxClique)) + ") is " + str(cliqueTransitionTimeAvg) + " iterations")
+    #print("The average transition time average with the starting node not being in the maxclique is " + str(nonCliqueTransitionTimeAvg) + " iterations")
+
+def return_transition_times(targetGraph):
+    graphs = graph_gen(targetGraph)
+    transitionMatrix = tm_generation(graphs)
+    transitionTimes = propogation_time_solver(transitionMatrix)
+    return transitionTimes
+
+
+target_Graph = nx.barbell_graph(4,3)
+n = target_Graph.number_of_nodes()
+print(return_transition_times(target_Graph))
 
 
 
+
+
+
+
+
+
+
+
+
+"""
 targetGraph = nx.barbell_graph(5,4) #graph is created here.   #cycle 14 takes 1k seconds for auto groups and 1 to 2 secs for trans matrix
 n = targetGraph.number_of_nodes()
 zeroForcingSetSize = 2 #size of the zero forcing set
@@ -465,12 +540,62 @@ graphs = graph_gen(targetGraph) #array of graphs, contains every single possible
 blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state
 transitionMatrix = tm_generation(graphs)
 transitionTimes = propogation_time_solver(transitionMatrix)
-startingSets = numswithbitcount(2**n, zeroForcingSetSize)
-print(transitionTimes[startingSets])
 transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize)
+"""
+
+
+
+
+
+
+
+#trying random graphs
+
+attempts = 0
+cliqueLarger = 0
+nonCliqueLarger = 0
+edgelist = []
+maxcliquelist = []
+numNodes = 10
+info = np.zeros((numNodes, 2))
+while attempts < 1000:
+    nodes = numNodes
+    edges = random.randint(nodes-1, nodes*(nodes-1)/2 -1 ) #i think this is biased towards larger graphs
+    targetGraph = nx.gnm_random_graph(nodes, edges)
+    while (not nx.is_connected(targetGraph)):
+        edges = random.randint(nodes -1 , nodes*(nodes-1)/2 -1 ) #i think this is biased towards larger graphs
+        targetGraph = nx.gnm_random_graph(nodes, edges)
+    edgelist.append(edges)
+    maxCliqueSize = len(nx.approximation.max_clique(targetGraph))
+    maxcliquelist.append(maxCliqueSize)
+    #print_graph(targetGraph)
+    n = nodes
+    graphs = graph_gen(targetGraph)
+    blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state
+    transitionMatrix = tm_generation(graphs)
+    transitionTimes = propogation_time_solver(transitionMatrix)
+    info[maxCliqueSize][0] += 1
+    info[maxCliqueSize][1] += transition_times_by_maxclique_minimum(targetGraph, transitionTimes, 1)
+    #cliqueLarger += transition_times_by_maxclique_minimum(targetGraph, transitionTimes, 1)
+    attempts += 1
+
+filtered_data = info[2:]
+x = np.arange(2, len(filtered_data) + 2)
+y1 = filtered_data[:, 1] / filtered_data[:, 0]
+y2 = x / numNodes
+plt.figure(figsize=(8, 6))
+plt.plot(x, y1, 'bo-', label='Percent of Graphs where minzeroforcingnode is in Maxclique')
+plt.plot(x, y2, 'r--', label='Theoretical percentage if maxclique doesnt affect zeroforcingtime')
+plt.xlabel('Row Number (Starting from 2)')
+plt.ylabel('Percentage Chance ')
+plt.legend()
+plt.show()
+#print(nonCliqueLarger) #avg time so far for most graphs lean towards not starting in clique as faster
+
 
 
 """
+#checking efficiency of automorphism algorithm
 succesfulChecks = 0
 failedChecks = 0
 automorphismGroups = automorphism_groups(graphs)[1:]
