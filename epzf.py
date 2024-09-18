@@ -8,6 +8,7 @@ from collections import defaultdict
 import time
 import itertools
 import random
+import os
 
 def largerBin_old(num): #Given a decimal integer, returns a supersetof all possible states that it can reach in one iteration
     nums = []
@@ -133,10 +134,23 @@ def blueNeighbors(graph, node): #Given a node and a graph, returns a list of its
             output.append(i)
     return output
 
+def blueSuppliers(graph, node):
+    output = []
+    for i in list(graph.predecessors(node)):
+        if graph.nodes[i]['color'] == 'blue':
+            output.append(i)
+    return output
+
 def numBlueNeighbors(graph): #Given a graph, returns an array of how many blue neighbors each node has
     output = []
     for i in range(n):
         output.append(len(blueNeighbors(graph, i)))
+    return output
+
+def numBlueSuppliers(graph):
+    output = []
+    for i in range(n):
+        output.append(len(blueSuppliers(graph, i)))
     return output
 
 def forcedProb(graph, node, numBlueNeighbors):
@@ -149,6 +163,13 @@ def forcedProb(graph, node, numBlueNeighbors):
         temp *= idoesntforcenodeprob
     return (1-temp)
 
+def forcedProb_Directed(graph, node):
+    numSuppliers = len(list(graph.predecessors(node)))
+    if numSuppliers == 0:
+        return 0
+    else:
+        return len(blueSuppliers(graph, node))/numSuppliers
+
 def numswithbitcount(max, ones):
     nums = []
     for i in range(max):
@@ -157,8 +178,17 @@ def numswithbitcount(max, ones):
     return nums
 
 def print_graph(graph):
-    nx.draw(graph)
+    nx.draw(graph, with_labels=True, node_color='skyblue', edge_color='gray', node_size=1500, font_size=12)
     plt.show()
+
+def save_graph_radius_ver(graph, radius, node, time, name):
+    directory = "/Users/noah01px2019/Desktop/graphs"
+    plt.figure()
+    plt.title("Radius = " + str(radius) + " Starting node = " + str(node) + " Propogation time = " +str(time))
+    file_path = os.path.join(directory, name)
+    nx.draw(graph, with_labels=True)
+    plt.savefig(file_path)
+    plt.close()
 
 def graph_gen(targetGraph):
     start = time.process_time()
@@ -222,8 +252,14 @@ def tm_generation_directed(graphs):
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     for i in range(2**n):
-        for j in largerBin(i, graphs):
-            temp = 0 #KEEP WRITING HERE!!
+        for j in largerBin_directed_newRule(i, graphs):
+            stateigraph = graphs[i]
+            tm[i][j] = 1
+            for k in differingDigits(i,j):
+                tm[i][j] *= forcedProb_Directed(stateigraph, k)
+            for m in sameZeros(i,j):
+                tm[i][j] *= (1-forcedProb_Directed(stateigraph, m))
+    tm[2**n-1][2**n-1] = 1
     return tm
 
 def tm_generation_sub(graphs, startingSet):
@@ -272,13 +308,14 @@ def propogation_time_solver(tm):
     #The fastest one
     solutions = np.zeros(size)
     solutions[size-1] = 0
-    for i in range(size-2, -1, -1):
+    for i in range(size-2, 0, -1):
         temp = calc_expected(tm, i, solutions)
         solutions[i] = temp
+    solutions[0] = float('inf')
     #print("Solving for propogation time took " + str(time.process_time() - start) + " seconds")
     return solutions
 
-def propogation_time_solver_4(tm): #This one uses the linalg method outlined in Hogben and Jesse's paper. It's Slow :(
+def propogation_time_solver_inverse(tm): #This one uses the linalg method outlined in Hogben and Jesse's paper. It's Slow :(
     size = len(tm)
     for row in tm:
         row[-1] -= 1
@@ -291,8 +328,11 @@ def calc_expected(tm, row, solutions):
     size = len(tm)
     temp = 0
     coefficient = 1-tm[row][row]
+    if coefficient == 0:
+        return float('inf')
     for i in range(row+1, size):
-        temp+= tm[row][i] * (solutions[i]+1)
+        if tm[row][i] != 0:
+            temp += tm[row][i] * (solutions[i]+1)
     temp+= (1-coefficient)
     temp /= coefficient
     return temp
@@ -319,7 +359,7 @@ def optimal_zfs_by_size(ptimes, size):
             solutions.append((i, min))
     return solutions #returns list with two elements. first element contains all zfs that achieve the min time, second elment is the min time
 
-def print_zfs(num, transitionTimes):
+def print_zfs(num, graphs, transitionTimes):
     color_map = []
     for i in range(n):
         if graphs[num].nodes[i]['color'] == 'blue':
@@ -330,13 +370,14 @@ def print_zfs(num, transitionTimes):
     nx.draw(targetGraph, node_color=color_map, with_labels=True)
     plt.show()
 
-def save_zfs(num, title, transitionTimes):
+def save_zfs(num, graphs, title, transitionTimes):
     color_map = []
     for i in range(n):
         if graphs[num].nodes[i]['color'] == 'blue':
             color_map.append('blue')
         else: 
             color_map.append('white')  
+    pos = nx.spring_layout(graphs[num], k = 1)
     plt.figure()    
     plt.title("Expected Propogation Time = " + str(transitionTimes[num]))
     nx.draw(targetGraph, node_color=color_map, with_labels=True)
@@ -512,24 +553,46 @@ def transition_times_by_maxclique_minimum(targetGraph, transitionTimes, zeroForc
 
 def return_transition_times(targetGraph):
     graphs = graph_gen(targetGraph)
-    transitionMatrix = tm_generation(graphs)
+    if nx.is_directed(targetGraph):
+        transitionMatrix = tm_generation_directed(graphs)
+    else:
+        transitionMatrix = tm_generation(graphs)
     transitionTimes = propogation_time_solver(transitionMatrix)
     return transitionTimes
 
+def has_multiple_zero_in_degree_nodes(G):
+    zero_in_degree_count = sum(1 for node in G.nodes if G.in_degree(node) == 0)
+    return zero_in_degree_count > 1
 
-target_Graph = nx.barbell_graph(4,3)
-n = target_Graph.number_of_nodes()
-print(return_transition_times(target_Graph))
+def has_cycle_without_node(graph, node):
+    allcycles = nx.simple_cycles(graph)
+    for i in allcycles:
+        if node not in i:
+            return True
+    return False
 
+def length_of_all_longest_paths(graph, startNode):
+    pathLengths = [0]
+    for i in [node for node in graph if node != startNode]:
+        if nx.has_path(graph, startNode, i):
+            paths = nx.all_simple_paths(graph, startNode, i)
+            max_length = max(len(path) for path in paths)
+            pathLengths.append(max_length -1 )
+    return pathLengths
 
+def all_nodes_reachable(graph, startNode):
+    for i in [node for node in graph if node != startNode]:
+        if not nx.has_path(graph, startNode, i):
+            return False
+    return True
 
-
-
-
-
-
-
-
+def create_tournament(size):
+    G = nx.DiGraph()
+    G.add_nodes_from([0,size-1])
+    for i in range(size-1):
+        for j in range(i+1, size):
+            G.add_edge(i,j)
+    return(G)
 
 
 """
@@ -543,14 +606,44 @@ transitionTimes = propogation_time_solver(transitionMatrix)
 transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize)
 """
 
+n = 10
+tournament = create_tournament(10)
+print_graph(tournament)
 
+
+attempts = 0
+print("starting...")
+while attempts < 10000:
+    n = 10
+    p = random.uniform(0.01,0.1)
+    p = 1/n
+    targetGraph = nx.erdos_renyi_graph(n, p, directed=True)
+    while((not nx.is_connected(targetGraph.to_undirected())) or (has_multiple_zero_in_degree_nodes(targetGraph))):
+        targetGraph = nx.erdos_renyi_graph(n, p, directed=True)
+    graphs = graph_gen(targetGraph)
+    tm = tm_generation_directed(graphs)
+    tt = propogation_time_solver(tm)
+    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+    minzfs = min(tt[zfs_size_one_indices])
+    startingNode = np.argmin(tt[zfs_size_one_indices])
+    rad = nx.radius(targetGraph.to_undirected())
+    if (max(length_of_all_longest_paths(targetGraph, startingNode)) <= rad) and not has_cycle_without_node(targetGraph, startingNode) and all_nodes_reachable(targetGraph, startingNode):
+        if (minzfs - rad) != 0:
+            save_graph_radius_ver(targetGraph, rad, startingNode, min(tt[zfs_size_one_indices]), str(attempts))
+            print('uh oh ')
+    if (minzfs - rad) <= 0.05:
+        if not ((max(length_of_all_longest_paths(targetGraph, startingNode)) <= rad) and not has_cycle_without_node(targetGraph, startingNode) and all_nodes_reachable(targetGraph, startingNode)):
+            save_graph_radius_ver(targetGraph, rad, startingNode, min(tt[zfs_size_one_indices]), str(attempts)) 
+            print('uh oh 2')
+    attempts += 1
+    if attempts % 1000 == 0:
+        print(attempts)
 
 
 
 
 
 #trying random graphs
-
 attempts = 0
 cliqueLarger = 0
 nonCliqueLarger = 0
@@ -558,7 +651,7 @@ edgelist = []
 maxcliquelist = []
 numNodes = 10
 info = np.zeros((numNodes, 2))
-while attempts < 1000:
+while attempts < 5000:
     nodes = numNodes
     edges = random.randint(nodes-1, nodes*(nodes-1)/2 -1 ) #i think this is biased towards larger graphs
     targetGraph = nx.gnm_random_graph(nodes, edges)
@@ -570,10 +663,7 @@ while attempts < 1000:
     maxcliquelist.append(maxCliqueSize)
     #print_graph(targetGraph)
     n = nodes
-    graphs = graph_gen(targetGraph)
-    blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state
-    transitionMatrix = tm_generation(graphs)
-    transitionTimes = propogation_time_solver(transitionMatrix)
+    transitionTimes = return_transition_times(targetGraph)
     info[maxCliqueSize][0] += 1
     info[maxCliqueSize][1] += transition_times_by_maxclique_minimum(targetGraph, transitionTimes, 1)
     #cliqueLarger += transition_times_by_maxclique_minimum(targetGraph, transitionTimes, 1)
@@ -586,10 +676,13 @@ y2 = x / numNodes
 plt.figure(figsize=(8, 6))
 plt.plot(x, y1, 'bo-', label='Percent of Graphs where minzeroforcingnode is in Maxclique')
 plt.plot(x, y2, 'r--', label='Theoretical percentage if maxclique doesnt affect zeroforcingtime')
-plt.xlabel('Row Number (Starting from 2)')
+plt.xlabel('Size of MaxClique')
 plt.ylabel('Percentage Chance ')
 plt.legend()
 plt.show()
+for i in range(11):
+    print(i)
+    print(maxcliquelist.count(i))
 #print(nonCliqueLarger) #avg time so far for most graphs lean towards not starting in clique as faster
 
 
