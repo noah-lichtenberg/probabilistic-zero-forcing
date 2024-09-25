@@ -5,6 +5,7 @@ import sympy as sp
 from math import comb
 from tqdm import tqdm
 from collections import defaultdict
+import math
 import time
 import itertools
 import random
@@ -164,11 +165,24 @@ def forcedProb(graph, node, numBlueNeighbors):
     return (1-temp)
 
 def forcedProb_Directed(graph, node):
-    numSuppliers = len(list(graph.predecessors(node)))
-    if numSuppliers == 0:
+    suppliers = list(graph.predecessors(node))
+    if len(suppliers) == 0:
         return 0
+    isWeighted = True
+    for edge in graph.in_edges(node):
+        if 'weight' not in edge:
+            isWeighted = False 
+    if not isWeighted:
+        return len(blueSuppliers(graph, node))/len(suppliers)
     else:
-        return len(blueSuppliers(graph, node))/numSuppliers
+        weightSum = 0
+        blueWeightSum = 0
+        for i in suppliers:
+            weight = graph[i][node].get('weight')
+            weightSum += weight
+            if graph[i].get('color') == 'blue':
+                blueWeightSum += weight
+        return weightSum/blueWeightSum
 
 def numswithbitcount(max, ones):
     nums = []
@@ -594,21 +608,86 @@ def create_tournament(size):
             G.add_edge(i,j)
     return(G)
 
+def return_nonzeros(tm):
+    output = []
+    for i in range(len(tm)):
+        temp = [(i)]
+        for j in range(len(tm)):
+            if tm[i][j] != 0:
+                temp.append((tm[i][j], j))
+        output.append(temp)
+    return output
+
+def tournament_erzf():
+    erzf_dic = {}
+    return tournament_erzf_state(1, erzf_dic), erzf_dic
+
+def transition_prob_tournament_erzf(startingState, endingState):
+    prob = 1
+    start = d2b(startingState)
+    end = d2b(endingState)
+    #for i in range(len(start)-2,-1,-1):
+    return 0
+
+
+def tournament_erzf_state(state, expectedTimes):
+    if state in expectedTimes:
+        return expectedTimes[state]
+    if state == 2**n-1:
+        expectedTimes[state] = 0
+        return 0
+    else:
+        et = 0
+        for possibleState in largerBin_old(state)[1:]:
+            start = d2b(state)
+            end = d2b(possibleState)
+            prob = 1
+            numOnes = 1
+            for i in range(n-2,-1,-1):
+                if start[i] == '0':
+                    if end[i] == '0':
+                        prob *= (1-numOnes/(n-i-1))
+                    else:
+                        prob *= numOnes/(n-i-1)
+                else: 
+                    numOnes += 1
+            et += prob * (tournament_erzf_state(possibleState, expectedTimes) +1)
+    expectedTimes[state] = et
+    return et
+
+
+for i in range(3,18):
+    n = i
+    print("size " + str(n) + " = " + str(tournament_erzf()[0]))
+
+start = time.process_time()
+for i in range(13,14):
+    n = i
+    tournament = create_tournament(n)
+    tt = return_transition_times(tournament)
+    print("size " + str(n) + " = " + str(tt[1]))
+print(str(time.process_time() - start))
+
 
 """
 targetGraph = nx.barbell_graph(5,4) #graph is created here.   #cycle 14 takes 1k seconds for auto groups and 1 to 2 secs for trans matrix
 n = targetGraph.number_of_nodes()
 zeroForcingSetSize = 2 #size of the zero forcing set
 graphs = graph_gen(targetGraph) #array of graphs, contains every single possible state
-blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state
+blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state, only matters for automorphisms
 transitionMatrix = tm_generation(graphs)
 transitionTimes = propogation_time_solver(transitionMatrix)
 transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize)
 """
 
-n = 10
-tournament = create_tournament(10)
-print_graph(tournament)
+n = 5
+tournament = create_tournament(n)
+graphs = graph_gen(tournament)
+tm = tm_generation_directed(graphs)
+print(return_nonzeros(tm))
+print(((tm[1::2,1::2])))
+tt = return_transition_times(tournament)
+
 
 
 attempts = 0
