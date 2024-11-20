@@ -205,7 +205,7 @@ def save_graph_radius_ver(graph, radius, node, time, name):
     plt.close()
 
 def graph_gen(targetGraph):
-    start = time.process_time()
+    #start = time.process_time()
     n = targetGraph.number_of_nodes()
     numGraphs = 2**n
     graphs = [None]*(numGraphs)
@@ -373,7 +373,7 @@ def optimal_zfs_by_size(ptimes, size):
             solutions.append((i, min))
     return solutions #returns list with two elements. first element contains all zfs that achieve the min time, second elment is the min time
 
-def print_zfs(num, graphs, transitionTimes):
+def print_zfs(targetGraph, num, graphs, transitionTimes):
     color_map = []
     for i in range(n):
         if graphs[num].nodes[i]['color'] == 'blue':
@@ -384,7 +384,7 @@ def print_zfs(num, graphs, transitionTimes):
     nx.draw(targetGraph, node_color=color_map, with_labels=True)
     plt.show()
 
-def save_zfs(num, graphs, title, transitionTimes):
+def save_zfs(targetGraph, num, graphs, title, transitionTimes):
     color_map = []
     for i in range(n):
         if graphs[num].nodes[i]['color'] == 'blue':
@@ -629,7 +629,6 @@ def transition_prob_tournament_erzf(startingState, endingState):
     #for i in range(len(start)-2,-1,-1):
     return 0
 
-
 def tournament_erzf_state(state, expectedTimes):
     if state in expectedTimes:
         return expectedTimes[state]
@@ -655,143 +654,155 @@ def tournament_erzf_state(state, expectedTimes):
     expectedTimes[state] = et
     return et
 
+def tournament_probability_matrix_method_erzf():
+    mat = np.zeros((n,n)) #rows = timestep starting at 0, columns the nodes
+    for i in range(n):
+        for j in range(i+1):
+            mat[i][j] = 1
+    for i in range(1,n):
+        for j in range(i+1, n):
+            temp = 0
+            for k in range(j):
+                temp += mat[i-1][k]
+            mat[i][j] = mat[i-1][j] + (1-mat[i-1][j])*temp/(j)
 
-for i in range(3,18):
-    n = i
-    print("size " + str(n) + " = " + str(tournament_erzf()[0]))
+    forcedProbVector = [0]
+    cumForcedProbVector = [0]
+    for i in range(1,n):
+        temp = 1
+        for j in range(n):
+            temp *= mat[i][j]
+        forcedProbVector.append(temp-cumForcedProbVector[i-1])
+        cumForcedProbVector.append(temp)
 
+    erzf = 0
+    for i in range(n):
+        erzf += i*forcedProbVector[i]
+    print(sum(forcedProbVector))
+    return mat
+
+def longest_string_matrix():
+    mat = np.zeros((n,n))
+    mat[0][0] = 1
+    for i in range(1,n):
+        for j in range(i,n-1):
+            prob = 1
+            for k in range(i,j+1):
+                prob *= i/k
+            prob *= 1-(i)/(j+1)
+            mat[i][j] = prob
+    for i in range(n):
+        mat[i][n-1] = 1-sum(mat[i])
+    return mat
+
+def create_bidirectional_path_graph():
+    path_graph = nx.path_graph(n)
+    directed_graph = nx.DiGraph()
+    for u, v in path_graph.edges():
+        directed_graph.add_edge(u, v) 
+        directed_graph.add_edge(v, u) 
+    return directed_graph
+
+def create_bidirectional_complete_graph():
+    complete_graph = nx.complete_graph(n)
+    directed_graph = nx.DiGraph()
+    for u, v in complete_graph.edges():
+        directed_graph.add_edge(u, v) 
+        directed_graph.add_edge(v, u) 
+    return directed_graph
+
+def create_bidirectional_complete_bipartite_graph(x,y):
+    G = nx.complete_bipartite_graph(x, y)
+    directed_graph = nx.DiGraph()
+    for u, v in G.edges():
+        directed_graph.add_edge(u, v)
+        directed_graph.add_edge(v, u)
+    return directed_graph
+
+def create_bidirectional_cycle_graph():
+    cycle_graph = nx.cycle_graph(n)
+    directed_graph = nx.DiGraph()
+    for u, v in cycle_graph.edges():
+        directed_graph.add_edge(u, v) 
+        directed_graph.add_edge(v, u) 
+    return directed_graph
+
+def create_bidirectional_sun_graph(): #n nodes, n/2 in the cycle, n/2 pendant nodes, cycle nodes labelled 0 to n/2-1
+    cycleLength = int(n/2)
+    G = nx.cycle_graph(cycleLength)
+    for i in range(cycleLength):
+        pendant_node = cycleLength + i  
+        G.add_node(pendant_node)
+        G.add_edge(i, pendant_node)
+    directed_graph = nx.DiGraph()
+    for u, v in G.edges():
+        directed_graph.add_edge(u, v) 
+        directed_graph.add_edge(v, u) 
+    return directed_graph
+
+def create_bidirectional_grid_graph(x, y):
+    grid_graph = nx.grid_2d_graph(x, y)
+    directed_graph = nx.DiGraph()
+    for u, v in grid_graph.edges():
+        directed_graph.add_edge(u, v)
+        directed_graph.add_edge(v, u)
+    mapping = { (i, j): i * y + j for i in range(x) for j in range(y) }
+    relabeled_graph = nx.relabel_nodes(directed_graph, mapping)
+    return relabeled_graph
+
+def create_bidirectional_hypercube_graph():
+    d = int(math.log2(n))
+    hypercube_graph = nx.hypercube_graph(d)
+    mapping = {node: i for i, node in enumerate(hypercube_graph.nodes())}
+    hypercube_graph = nx.relabel_nodes(hypercube_graph, mapping)
+    directed_graph = nx.DiGraph()
+    for u, v in hypercube_graph.edges():
+        directed_graph.add_edge(u, v)
+        directed_graph.add_edge(v, u)
+    return directed_graph
+
+def all_nodes_blue(graph):
+    return all(data.get('color') == 'blue' for _, data in graph.nodes(data=True))
+
+def rzf_simulation(targetGraph, startingSet):
+    iterations = 0
+    start = 0
+    for num in startingSet:
+        start += 2**num
+    binaryString = d2b(start)
+    graph = targetGraph.copy()
+    for j in range(n):
+        if binaryString[n-j-1] == "1":
+            graph.nodes[j]['color'] = "blue"
+        else:
+            graph.nodes[j]['color'] = "white"
+    while not all_nodes_blue(graph):
+        iterations += 1
+        turnedBlue = []
+        for i in range(n):
+            in_degree = graph.in_degree(i)
+            if in_degree > 0:
+                blue_predecessors = len(blueNeighbors(graph,i))
+                probability = blue_predecessors / in_degree
+                if random.random() <= probability:
+                    turnedBlue.append(i)
+        for node in turnedBlue:
+            graph.nodes[node]['color'] = 'blue'
+    return iterations
+
+n = 2**16
+G = create_bidirectional_hypercube_graph()
+"""start = time.process_time()
+tt = return_transition_times(G)
+zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+print(tt[zfs_size_one_indices])
+print("Time needed to generate transition times = " + str(time.process_time() - start) + " seconds")"""
+sum = 0
+zfsSet = [0]
 start = time.process_time()
-for i in range(13,14):
-    n = i
-    tournament = create_tournament(n)
-    tt = return_transition_times(tournament)
-    print("size " + str(n) + " = " + str(tt[1]))
-print(str(time.process_time() - start))
+for i in range(1000):
+    sum += rzf_simulation(G, zfsSet)
+print(sum)
+print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
 
-
-"""
-targetGraph = nx.barbell_graph(5,4) #graph is created here.   #cycle 14 takes 1k seconds for auto groups and 1 to 2 secs for trans matrix
-n = targetGraph.number_of_nodes()
-zeroForcingSetSize = 2 #size of the zero forcing set
-graphs = graph_gen(targetGraph) #array of graphs, contains every single possible state
-blueDegSeqGroups = blue_degree_sequence_groups(graphs) #dictionary of the degree sequences of blue nodes for every possible state, only matters for automorphisms
-transitionMatrix = tm_generation(graphs)
-transitionTimes = propogation_time_solver(transitionMatrix)
-transition_times_by_maxclique(targetGraph, transitionTimes, zeroForcingSetSize)
-"""
-
-n = 5
-tournament = create_tournament(n)
-graphs = graph_gen(tournament)
-tm = tm_generation_directed(graphs)
-print(return_nonzeros(tm))
-print(((tm[1::2,1::2])))
-tt = return_transition_times(tournament)
-
-
-
-attempts = 0
-print("starting...")
-while attempts < 10000:
-    n = 10
-    p = random.uniform(0.01,0.1)
-    p = 1/n
-    targetGraph = nx.erdos_renyi_graph(n, p, directed=True)
-    while((not nx.is_connected(targetGraph.to_undirected())) or (has_multiple_zero_in_degree_nodes(targetGraph))):
-        targetGraph = nx.erdos_renyi_graph(n, p, directed=True)
-    graphs = graph_gen(targetGraph)
-    tm = tm_generation_directed(graphs)
-    tt = propogation_time_solver(tm)
-    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-    minzfs = min(tt[zfs_size_one_indices])
-    startingNode = np.argmin(tt[zfs_size_one_indices])
-    rad = nx.radius(targetGraph.to_undirected())
-    if (max(length_of_all_longest_paths(targetGraph, startingNode)) <= rad) and not has_cycle_without_node(targetGraph, startingNode) and all_nodes_reachable(targetGraph, startingNode):
-        if (minzfs - rad) != 0:
-            save_graph_radius_ver(targetGraph, rad, startingNode, min(tt[zfs_size_one_indices]), str(attempts))
-            print('uh oh ')
-    if (minzfs - rad) <= 0.05:
-        if not ((max(length_of_all_longest_paths(targetGraph, startingNode)) <= rad) and not has_cycle_without_node(targetGraph, startingNode) and all_nodes_reachable(targetGraph, startingNode)):
-            save_graph_radius_ver(targetGraph, rad, startingNode, min(tt[zfs_size_one_indices]), str(attempts)) 
-            print('uh oh 2')
-    attempts += 1
-    if attempts % 1000 == 0:
-        print(attempts)
-
-
-
-
-
-#trying random graphs
-attempts = 0
-cliqueLarger = 0
-nonCliqueLarger = 0
-edgelist = []
-maxcliquelist = []
-numNodes = 10
-info = np.zeros((numNodes, 2))
-while attempts < 5000:
-    nodes = numNodes
-    edges = random.randint(nodes-1, nodes*(nodes-1)/2 -1 ) #i think this is biased towards larger graphs
-    targetGraph = nx.gnm_random_graph(nodes, edges)
-    while (not nx.is_connected(targetGraph)):
-        edges = random.randint(nodes -1 , nodes*(nodes-1)/2 -1 ) #i think this is biased towards larger graphs
-        targetGraph = nx.gnm_random_graph(nodes, edges)
-    edgelist.append(edges)
-    maxCliqueSize = len(nx.approximation.max_clique(targetGraph))
-    maxcliquelist.append(maxCliqueSize)
-    #print_graph(targetGraph)
-    n = nodes
-    transitionTimes = return_transition_times(targetGraph)
-    info[maxCliqueSize][0] += 1
-    info[maxCliqueSize][1] += transition_times_by_maxclique_minimum(targetGraph, transitionTimes, 1)
-    #cliqueLarger += transition_times_by_maxclique_minimum(targetGraph, transitionTimes, 1)
-    attempts += 1
-
-filtered_data = info[2:]
-x = np.arange(2, len(filtered_data) + 2)
-y1 = filtered_data[:, 1] / filtered_data[:, 0]
-y2 = x / numNodes
-plt.figure(figsize=(8, 6))
-plt.plot(x, y1, 'bo-', label='Percent of Graphs where minzeroforcingnode is in Maxclique')
-plt.plot(x, y2, 'r--', label='Theoretical percentage if maxclique doesnt affect zeroforcingtime')
-plt.xlabel('Size of MaxClique')
-plt.ylabel('Percentage Chance ')
-plt.legend()
-plt.show()
-for i in range(11):
-    print(i)
-    print(maxcliquelist.count(i))
-#print(nonCliqueLarger) #avg time so far for most graphs lean towards not starting in clique as faster
-
-
-
-"""
-#checking efficiency of automorphism algorithm
-succesfulChecks = 0
-failedChecks = 0
-automorphismGroups = automorphism_groups(graphs)[1:]
-automorphismMatrix = generate_automorphism_matrix(automorphismGroups, graphs)
-automorphicTransitionTimes = propogation_time_solver(automorphismMatrix)
-print(automorphicTransitionTimes)
-print(succesfulChecks)
-print(failedChecks)
-"""
-
-#Compare values in automorphism transition times and regular transition times
-
-
-"""
-start = time.process_time()
-for i in automorphism_groups(graphs):
-    print(i)
-    print(transitionTimes[i[0]])
-print("Time needed for algebraic epzf solving = " + str(time.process_time() - start) + " seconds")
-"""
-
-"""
-optimalSol = optimal_zfs_by_size(transitionTimesFixed, zeroForcingSetSize)
-print_zfs((optimalSol[0])[0])
-"""
-
-#next steps, symmetric graphs, cut edges
+#for simulation, track blue nodes and only consider successors to blue nodes
