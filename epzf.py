@@ -245,7 +245,7 @@ def tm_generation_old(graphs): #outdated, quite slow
     #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm
 
-def tm_generation(graphs):
+def tm_generation(graphs): #for probabilistic zero forcing, undirected graphs
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     #The states of the transition matrix is stored as follows - the nth node being blue refers to a 1 in the nth digit of the binary expression of the state.
@@ -256,13 +256,13 @@ def tm_generation(graphs):
             tm[i][j] = 1
             for k in differingDigits(i, j): #all differing digits must go from 0 to 1, otherwise transition impossible. First consdiering probabilities of vertices being forced
                 tm[i][j] *= forcedProb(stateigraph, k, numBlueNeighborsi)
-            for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!)
+            for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!
                 tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
     tm[2**n-1][2**n-1] = 1
     #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm
 
-def tm_generation_directed(graphs):
+def tm_generation_directed(graphs): #for randomized zero forcing, directed graphs
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     for i in range(2**n):
@@ -761,6 +761,14 @@ def create_bidirectional_hypercube_graph():
         directed_graph.add_edge(v, u)
     return directed_graph
 
+def create_bidirectional_star_graph():
+    star_graph = nx.star_graph(n-1)
+    directed_graph = nx.DiGraph()
+    for u, v in star_graph.edges():
+        directed_graph.add_edge(u, v)
+        directed_graph.add_edge(v, u)
+    return directed_graph
+
 def all_nodes_blue(graph):
     return all(data.get('color') == 'blue' for _, data in graph.nodes(data=True))
 
@@ -790,14 +798,223 @@ def rzf_simulation(targetGraph, startingSet):
             graph.nodes[node]['color'] = 'blue'
     return iterations
 
-n = 2**16
-G = create_bidirectional_hypercube_graph()
-"""start = time.process_time()
+def create_connected_random_directed_graph(probability):
+    G = nx.gnp_random_graph(n, probability, directed=True)
+    while not nx.is_strongly_connected(G):
+        G = nx.gnp_random_graph(n, probability, directed=True)
+    return G
+
+
+trials = 1000
+
+centrality_measures = {
+    'Degree Centrality': nx.degree_centrality,
+    'Betweenness Centrality': nx.betweenness_centrality,
+    'Closeness Centrality': nx.closeness_centrality,
+    'Eigenvector Centrality': nx.eigenvector_centrality
+}
+
+frequencies = {name: np.zeros(11) for name in centrality_measures}
+
+for i in tqdm(range(trials), desc="Calculating centralities"):
+    n = 11
+    G = create_connected_random_directed_graph(0.5)
+    tt = return_transition_times(G)
+    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+    minin_node = np.argmin(tt[zfs_size_one_indices])
+    
+    for centrality_name, centrality_func in centrality_measures.items():
+        centrality = centrality_func(G)
+        centrality_ranking = sorted(centrality, key=centrality.get, reverse=True)
+        centrality_index = centrality_ranking.index(minin_node)
+        frequencies[centrality_name][centrality_index] += 1
+
+for centrality_name, frequency in frequencies.items():
+    plt.bar(range(len(frequency)), frequency)
+    plt.xlabel('Centrality Ranking')
+    plt.ylabel('Frequency')
+    plt.title(f'Frequency of Minimum Propagation Time Node by {centrality_name}')
+    plt.savefig(f"/Users/noah01px2019/Desktop/{centrality_name.replace(' ', '_')}.png")
+    plt.close()
+
+
+
+
+
+n = 11
+G = create_bidirectional_complete_graph()
+graphs = graph_gen(G)
+tm = tm_generation(graphs)
+tt = propogation_time_solver(tm)
+print(tt[1])
+
+
+
+trials = 100000
+n =10
+G = create_bidirectional_complete_bipartite_graph(2,n-2)
+zfsSet = [1]
+start = time.process_time()
+iterations_count = np.zeros(n+2)
+for i in range(trials):
+    iterations = rzf_simulation(G, zfsSet)
+    iterations_count[iterations] += 1
+print(iterations_count)
+print("Time needed to run simulations = " + str(time.process_time() - start) + " seconds")
+markov_bound = np.zeros(n+2)
+percent_occurence = iterations_count/trials
+for i in range(n+2):
+    prob = sum(percent_occurence[:i])
+    markov_bound[i] = (1-prob)*i
+print(markov_bound)
+
+
+for i in range(3,12): 
+    n = i
+    G = nx.star_graph(n-1)
+    tt = return_transition_times(G)
+    print("For n = " + str(n) + ", the expected propogation time is " + str(tt[1]) + " iterations")
+
+for i in range(3,12): #the same! sugoi~!
+    n = i
+    G = create_bidirectional_complete_graph()
+    tt = return_transition_times(G)
+    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+    minin = min(tt[zfs_size_one_indices])
+    print("For n = " + str(n) + ", the minimum expected propogation time is " + str(minin) + " iterations")
+
+
+
+for i in range(3,15):
+    n = 2+i
+    G = create_bidirectional_complete_bipartite_graph(2,n-2)
+    tt = return_transition_times(G)
+    print("For n = " + str(n) + ", the expected propogation time is " + str(tt[1]) + " iterations")
+
+
+
+
+
+
+def markov_tournament(trials):
+    n = 5
+    G = create_bidirectional_complete_bipartite_graph(2,n-2)
+    nums = range(0,10)
+    iterations_count = np.zeros(len(nums))
+    for i in tqdm(range(trials)):
+        iterations = rzf_simulation(G,[1],n)
+        iterations_count[iterations] += 1
+    return iterations_count
+
+print(markov_tournament(100))
+
+
+"""minin_values = []
+n_values = range(2,16)
+for i in n_values:
+    n = i
+    G = create_tournament(n)
+    tt = return_transition_times(G)
+    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+    minin = min(tt[zfs_size_one_indices])
+    minin_values.append(minin)
+
+log2_values = [np.log2(n) for n in n_values]
+
+plt.plot(n_values, minin_values, marker='o', linestyle='-', label=r'$\operatorname{ept}_{\mathit{rzf}}(T_n)$')
+plt.plot(n_values, log2_values, marker='s', linestyle='--', label=r'$\log_2(n)$')
+
+plt.xlabel(r'$n$')
+plt.ylabel(r'$\operatorname{ept}_{\mathit{rzf}}(T_n)$')
+plt.title(r'$\operatorname{ept}_{\mathit{rzf}}(T_n)$ vs $\log_2(n)$')
+plt.legend()
+plt.grid()
+plt.show()
+"""
+
+
+n_values = range(2,14)
+b_values = []
+for i in tqdm(n_values):
+    a = i
+    b = 2
+    n = a+b
+    G = create_bidirectional_complete_bipartite_graph(a,b)
+    tt = return_transition_times(G)
+    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+    bStart = tt[2**(n-1)]
+    b_values.append(bStart)
+
+log2_values = [3-(1/2)**n for n in n_values]
+
+plt.plot(n_values, b_values, marker='o', linestyle='-', label=r'$\operatorname{ept}_{\mathit{rzf}}(K_{2,n})$')
+plt.plot(n_values, log2_values, marker='s', linestyle='--', label=r'Lower Bound')
+
+plt.xlabel(r'$n$')
+plt.ylabel(r'$\operatorname{ept}_{\mathit{rzf}}(K_{2,n})$')
+plt.title(r'$\operatorname{ept}_{\mathit{rzf}}(K_{2,n})$ vs Lower Bound')
+plt.legend()
+plt.grid()
+plt.show()
+
+
+
+
+for i in range(1,10):
+    a = i
+    for j in range(1,i+1):
+        b = j
+        n = a+b
+        G = create_bidirectional_complete_bipartite_graph(a,b)
+        tt = return_transition_times(G)
+        zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+        aStart = tt[1]
+        bStart = tt[2**(n-1)]
+        print("For a = " + str(a) + ", b = " + str(b) + ", the expected propogation time for the first node is " + str(aStart) + " and the expected propogation time for the second node is " + str(bStart))
+        
+
+n = 10
+G = create_bidirectional_complete_bipartite_graph(5,5)
+tt = return_transition_times(G)
+print(tt[0])
+
+
+
+
+
+for i in range(2,5):
+    n = 2**i
+    G = create_bidirectional_hypercube_graph()
+    tt = return_transition_times(G)
+    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
+    minin = min(tt[zfs_size_one_indices])
+    print("For n = " + str(n) + ", the minimum expected propogation time is " + str(minin) + " iterations")
+
+for i in range(5,11):
+    n = 2**i
+    G = create_bidirectional_hypercube_graph()
+    sum = 0
+    zfsSet = [0]
+    start = time.process_time()
+    for i in range(1000):
+        sum += rzf_simulation(G, zfsSet)
+    print("For n = " + str(n) + ", the average number of iterations needed to propogate is " + str(sum/1000) + " iterations")
+    print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
+
+    
+
+
+n = 12
+G = create_bidirectional_sun_graph()
+G.add_edges_from([(0,3),(1,4),(3,0),(4,1),(2,5),(5,2),(4,2),(2,4)]) #it appears that chords within the cycle lower the ezpf
+start = time.process_time()
 tt = return_transition_times(G)
 zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
 print(tt[zfs_size_one_indices])
-print("Time needed to generate transition times = " + str(time.process_time() - start) + " seconds")"""
-sum = 0
+print("Time needed to generate transition times = " + str(time.process_time() - start) + " seconds")
+
+
+"""sum = 0
 zfsSet = [0]
 start = time.process_time()
 for i in range(1000):
@@ -805,4 +1022,17 @@ for i in range(1000):
 print(sum)
 print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
 
-#for simulation, track blue nodes and only consider successors to blue nodes
+#for simulation, track blue nodes and only consider successors to blue nodes"""
+
+
+
+for i in range(5,11):
+    n = 2**i
+    G = create_bidirectional_hypercube_graph()
+    sum = 0
+    zfsSet = [0]
+    start = time.process_time()
+    for i in range(1000):
+        sum += rzf_simulation(G, zfsSet)
+    print("For n = " + str(n) + ", the average number of iterations needed to propogate is " + str(sum/1000) + " iterations")
+    print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
