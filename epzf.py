@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
 import sympy as sp
+import scipy as sc
 from math import comb
 from tqdm import tqdm
 from collections import defaultdict
@@ -221,6 +222,21 @@ def graph_gen(targetGraph):
     #print("Time needed for graph creation = " + str(time.process_time() - start) + " seconds")
     return graphs
 
+def graph_gen_sub(targetGraph, states):
+    n = targetGraph.number_of_nodes()
+    numGraphs = len(states)
+    graphs = [None]*(2**n)
+    for i in range(numGraphs):
+        binaryString = d2b(states[i])
+        graph = targetGraph.copy()
+        for j in range(n):
+            if binaryString[n-j-1] == "1":
+                graph.nodes[j]['color'] = "blue"
+            else:
+                graph.nodes[j]['color'] = "white"
+        graphs[states[i]] = graph
+    return graphs
+
 def tm_generation_old(graphs): #outdated, quite slow
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
@@ -246,6 +262,8 @@ def tm_generation_old(graphs): #outdated, quite slow
     return tm
 
 def tm_generation(graphs): #for probabilistic zero forcing, undirected graphs
+    if graphs[0].is_directed() == True:
+        raise ValueError("Graphs must be undirected!")
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     #The states of the transition matrix is stored as follows - the nth node being blue refers to a 1 in the nth digit of the binary expression of the state.
@@ -260,9 +278,11 @@ def tm_generation(graphs): #for probabilistic zero forcing, undirected graphs
                 tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
     tm[2**n-1][2**n-1] = 1
     #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
-    return tm
+    return tm, time.process_time() - start #delete the time after testing
 
 def tm_generation_directed(graphs): #for randomized zero forcing, directed graphs
+    if graphs[0].is_directed() == False:
+        raise ValueError("Graphs must be directed!")
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
     for i in range(2**n):
@@ -274,7 +294,8 @@ def tm_generation_directed(graphs): #for randomized zero forcing, directed graph
             for m in sameZeros(i,j):
                 tm[i][j] *= (1-forcedProb_Directed(stateigraph, m))
     tm[2**n-1][2**n-1] = 1
-    return tm
+    #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
+    return tm, time.process_time() - start #delete the time after testing
 
 def tm_generation_sub(graphs, startingSet):
     start = time.process_time()
@@ -293,6 +314,43 @@ def tm_generation_sub(graphs, startingSet):
     subtm = tm[np.ix_(states, states)]
     #print("Time needed for Transition Matrix Generation with submatrix of size " + str(len(states)) + " in " + str(time.process_time() - start) + " seconds")
     return subtm
+
+def tm_generation_directed_sub(graphs,states):
+    #if graphs[0].is_directed() == False:
+     #   raise ValueError("Graphs must be directed!")
+    start = time.process_time()
+    numStates = len(states)
+    tm = np.zeros([numStates,numStates])
+    for i in range(numStates):
+        for j in largerBin_directed_newRule(states[i], graphs): #j is the state itself
+            stateigraph = graphs[states[i]]
+            tm[i][states.index(j)] = 1
+            for k in differingDigits(states[i],j):
+                tm[i][states.index(j)] *= forcedProb_Directed(stateigraph, k)
+            for m in sameZeros(states[i],j):
+                tm[i][states.index(j)] *= (1-forcedProb_Directed(stateigraph, m))
+    tm[len(states)-1][len(states)-1] = 1
+    #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
+    return tm, time.process_time() - start #delete the time after testing
+
+def path_binary_states(n):
+    results = []
+    center = n // 2 if n % 2 == 1 else n // 2 - 1
+
+    for i in range(n):
+        for j in range(i, n):
+            if i <= center <= j:
+                s = ['0'] * n
+                for k in range(i, j + 1):
+                    s[k] = '1'
+                results.append(''.join(s))
+
+    # Sort lexicographically (i.e. by binary string)
+    results.sort()
+
+    # Convert to integers
+    return [int(x, 2) for x in results]
+
 """
 #sanity check
 rowSums = np.zeros(2**n)
@@ -327,16 +385,21 @@ def propogation_time_solver(tm):
         solutions[i] = temp
     solutions[0] = float('inf')
     #print("Solving for propogation time took " + str(time.process_time() - start) + " seconds")
-    return solutions
+    #return solutions
+    return solutions, time.process_time() - start
 
 def propogation_time_solver_inverse(tm): #This one uses the linalg method outlined in Hogben and Jesse's paper. It's Slow :(
+    tm = tm[1:, 1:]
     size = len(tm)
     for row in tm:
         row[-1] -= 1
     start = time.process_time()
-    temp = np.linalg.inv(tm-np.identity(size))
+    temp = sc.linalg.solve_triangular(tm-np.identity(size),np.identity(size))
     #print("Finding an inverse took " + str(time.process_time() - start) + " seconds")
-    return temp[0][size-1] + 1
+    vector = temp[:,size-1] + 1
+    vector = np.insert(vector , 0, float('inf'))
+    #return temp #vector
+    return vector, time.process_time() - start
 
 def calc_expected(tm, row, solutions):
     size = len(tm)
@@ -403,11 +466,11 @@ def return_automorphic_states(graphs,index,automorphicKeys):
     for state in automorphicKeys[key]:
         if nx.is_isomorphic(graphs[index], graphs[state], node_match=color_match):
             ans.append(state)
-            global succesfulChecks
-            succesfulChecks += 1
-        else:
-            global failedChecks
-            failedChecks += 1
+            #global succesfulChecks
+            #succesfulChecks += 1
+        #else:
+            #global failedChecks
+            #failedChecks += 1
     return ans
 
 def automorphism_groups(graphs):
@@ -798,11 +861,181 @@ def rzf_simulation(targetGraph, startingSet):
             graph.nodes[node]['color'] = 'blue'
     return iterations
 
-def create_connected_random_directed_graph(probability):
+def create_connected_random_directed_graph(probability=0.5):
     G = nx.gnp_random_graph(n, probability, directed=True)
     while not nx.is_strongly_connected(G):
         G = nx.gnp_random_graph(n, probability, directed=True)
     return G
+
+def pad_top_left_with_one(matrix):
+    matrix = np.array(matrix)
+    rows, cols = matrix.shape
+
+    # Create a new zero matrix one size bigger
+    padded = np.zeros((rows + 1, cols + 1), dtype=matrix.dtype)
+
+    # Copy original matrix into bottom-right part
+    padded[1:, 1:] = matrix
+
+    # Set top-left cell to 1
+    padded[0, 0] = 1
+
+    return padded
+
+trials = 10
+numbers = range(4, 40)
+offset = min(numbers)  # Adjust index offset
+dptimes = np.zeros(len(numbers))
+invtimes = np.zeros(len(numbers))
+tmgentimes = np.zeros(len(numbers))
+
+output_file = "/Users/noah01px2019/Desktop/ept_calculation_times.txt"
+
+with open(output_file, "w") as f:
+    f.write("n,TM_Generation_Time,Back_Substitution_Time,Inverse_Method_Time\n")
+
+for i in numbers:
+    index = i - offset  # Adjusted index
+    n = i
+    G = create_bidirectional_path_graph()
+    states = path_binary_states(n)
+    graphs = graph_gen_sub(G,states)
+    for j in range(trials):
+        tm, tmtime = tm_generation_directed_sub(graphs, states)
+        tm = pad_top_left_with_one(tm)
+        tmgentimes[index] += tmtime
+        tttime = propogation_time_solver(tm)[1]
+        tt2time = propogation_time_solver_inverse(tm)[1]
+        dptimes[index] += tttime
+        invtimes[index] += tt2time
+
+    tmgentimes[index] /= trials
+    dptimes[index] /= trials
+    invtimes[index] /= trials
+
+    # Save results to the file after each iteration
+    with open(output_file, "a") as f:
+        f.write(f"{n},{tmgentimes[index]},{dptimes[index]},{invtimes[index]}\n")
+
+
+
+n = 7
+G = create_bidirectional_path_graph()
+states = path_binary_states(n)
+graphs = graph_gen_sub(G, states)
+tm = tm_generation_directed_sub(graphs,states)[0]
+tm = pad_top_left_with_one(tm)
+tttime = propogation_time_solver_inverse(tm)[0]
+print(tttime[1])
+
+
+
+
+
+
+while True:
+    i = 1
+
+
+
+
+
+n = 5
+G = create_bidirectional_complete_graph()
+graphs = graph_gen(G)
+tm = tm_generation_directed(graphs)[0]
+print(tm)
+tt1 = propogation_time_solver(tm)
+tt2 = propogation_time_solver_inverse(tm)
+print(tt1)
+print(tt2)
+
+
+
+trials = 1
+numbers = range(4, 30)
+offset = min(numbers)  # Adjust index offset
+dptimes = np.zeros(len(numbers))
+invtimes = np.zeros(len(numbers))
+tmgentimes = np.zeros(len(numbers))
+
+output_file = "/Users/noah01px2019/Desktop/ept_calculation_times.txt"
+
+with open(output_file, "w") as f:
+    f.write("n,TM_Generation_Time,Back_Substitution_Time,Inverse_Method_Time\n")
+
+for i in numbers:
+    index = i - offset  # Adjusted index
+    n = i
+    for j in range(trials):
+        G = nx.erdos_renyi_graph(n, 0.5)
+        while not nx.is_connected(G):
+            G = nx.erdos_renyi_graph(n, 0.5)
+        
+        graphs = graph_gen(G)
+        tm, tmtime = tm_generation(graphs)
+        tmgentimes[index] += tmtime
+        tttime = propogation_time_solver(tm)
+        tt2time = propogation_time_solver_inverse(tm)
+        dptimes[index] += tttime
+        invtimes[index] += tt2time
+
+    tmgentimes[index] /= trials
+    dptimes[index] /= trials
+    invtimes[index] /= trials
+
+    # Save results to the file after each iteration
+    with open(output_file, "a") as f:
+        f.write(f"{n},{tmgentimes[index]},{dptimes[index]},{invtimes[index]}\n")
+
+
+
+
+for i in range(3,15):
+    n = 2+i
+    G = create_bidirectional_complete_bipartite_graph(2,n-2)
+    tt = return_transition_times(G)
+    print("For n = " + str(n) + ", the expected propogation time is " + str(tt[1]) + " iterations")
+
+
+
+
+
+
+n = 10
+G = create_bidirectional_complete_graph()
+graphs = graph_gen(G)
+tm = tm_generation_directed(graphs)
+tt = propogation_time_solver(tm)
+print(tt[1])
+
+
+
+n = 10
+G = create_bidirectional_complete_graph()
+graphs = graph_gen(G)
+tm = tm_generation_directed(graphs)
+print(tm)
+start = time.time()
+transitionTimes = propogation_time_solver(tm)
+finish = time.time()
+print(transitionTimes)
+
+
+
+        
+
+
+n = 14
+G = nx.complete_graph(n)
+graphs = graph_gen(G)
+tm = tm_generation(graphs)
+tt = propogation_time_solver(tm)
+print(tt[1])
+
+
+
+
 
 
 trials = 1000
@@ -837,16 +1070,6 @@ for centrality_name, frequency in frequencies.items():
     plt.savefig(f"/Users/noah01px2019/Desktop/{centrality_name.replace(' ', '_')}.png")
     plt.close()
 
-
-
-
-
-n = 11
-G = create_bidirectional_complete_graph()
-graphs = graph_gen(G)
-tm = tm_generation(graphs)
-tt = propogation_time_solver(tm)
-print(tt[1])
 
 
 
