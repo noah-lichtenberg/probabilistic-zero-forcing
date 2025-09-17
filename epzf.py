@@ -3,9 +3,14 @@ import networkx as nx
 import numpy as np
 import sympy as sp
 import scipy as sc
+from scipy.sparse import lil_matrix, csr_matrix, hstack, vstack
+from collections import Counter
 from math import comb
 from tqdm import tqdm
 from collections import defaultdict
+from matplotlib.cm import get_cmap
+from matplotlib.colors import Normalize
+from matplotlib.cm import ScalarMappable
 import math
 import time
 import itertools
@@ -225,7 +230,7 @@ def graph_gen(targetGraph):
 def graph_gen_sub(targetGraph, states):
     n = targetGraph.number_of_nodes()
     numGraphs = len(states)
-    graphs = [None]*(2**n)
+    graphs = [None]*(numGraphs)
     for i in range(numGraphs):
         binaryString = d2b(states[i])
         graph = targetGraph.copy()
@@ -234,7 +239,7 @@ def graph_gen_sub(targetGraph, states):
                 graph.nodes[j]['color'] = "blue"
             else:
                 graph.nodes[j]['color'] = "white"
-        graphs[states[i]] = graph
+        graphs[i] = graph
     return graphs
 
 def tm_generation_old(graphs): #outdated, quite slow
@@ -297,6 +302,23 @@ def tm_generation_directed(graphs): #for randomized zero forcing, directed graph
     #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm, time.process_time() - start #delete the time after testing
 
+def tm_generation_directed_sparse(graphs):
+    if not graphs[0].is_directed():
+        raise ValueError("Graphs must be directed!")
+    start = time.process_time()
+    tm = lil_matrix((2**n, 2**n))
+    for i in range(2**n):
+        for j in largerBin_directed_newRule(i, graphs):
+            stateigraph = graphs[i]
+            prob = 1.0
+            for k in differingDigits(i, j):
+                prob *= forcedProb_Directed(stateigraph, k)
+            for m in sameZeros(i, j):
+                prob *= (1 - forcedProb_Directed(stateigraph, m))
+            tm[i, j] = prob
+    tm[2**n - 1, 2**n - 1] = 1.0
+    return tm.tocsr(), time.process_time() - start
+
 def tm_generation_sub(graphs, startingSet):
     start = time.process_time()
     tm = np.zeros([2**n,2**n])
@@ -308,30 +330,52 @@ def tm_generation_sub(graphs, startingSet):
             tm[i][j] = 1
             for k in differingDigits(i, j): #all differing digits must go from 0 to 1, otherwise transition impossible. First consdiering probabilities of vertices being forced
                 tm[i][j] *= forcedProb(stateigraph, k, numBlueNeighborsi)
-            for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!)
+            for m in sameZeros(i,j): #all 0s that stay as 0s must not have been forced!
                 tm[i][j] *= (1-forcedProb(stateigraph, m, numBlueNeighborsi))
     tm[2**n-1][2**n-1] = 1
     subtm = tm[np.ix_(states, states)]
     #print("Time needed for Transition Matrix Generation with submatrix of size " + str(len(states)) + " in " + str(time.process_time() - start) + " seconds")
     return subtm
 
-def tm_generation_directed_sub(graphs,states):
-    #if graphs[0].is_directed() == False:
-     #   raise ValueError("Graphs must be directed!")
+def tm_generation_directed_sub(graphs,states): #use sub graphs for this one, grpahs length should equal states length
+    if graphs[0].is_directed() == False:
+       raise ValueError("Graphs must be directed!")
     start = time.process_time()
     numStates = len(states)
     tm = np.zeros([numStates,numStates])
     for i in range(numStates):
-        for j in largerBin_directed_newRule(states[i], graphs): #j is the state itself
-            stateigraph = graphs[states[i]]
-            tm[i][states.index(j)] = 1
-            for k in differingDigits(states[i],j):
-                tm[i][states.index(j)] *= forcedProb_Directed(stateigraph, k)
-            for m in sameZeros(states[i],j):
-                tm[i][states.index(j)] *= (1-forcedProb_Directed(stateigraph, m))
+        stateigraph = graphs[i]
+        for j in range(i,numStates): #j is the state itself
+            if transitionPossible(states[i],states[j]):
+                tm[i][j] = 1
+                for k in differingDigits(states[i],states[j]):
+                    tm[i][j] *= forcedProb_Directed(stateigraph, k)
+                for m in sameZeros(states[i],states[j]):
+                    tm[i][j] *= (1-forcedProb_Directed(stateigraph, m))
     tm[len(states)-1][len(states)-1] = 1
     #print("Time needed for Transition Matrix Generation = " + str(time.process_time() - start) + " seconds")
     return tm, time.process_time() - start #delete the time after testing
+
+def tm_generation_directed_sub_sparse(graphs, states):
+    if not graphs[0].is_directed():
+        raise ValueError("Graphs must be directed!")
+    start = time.process_time()
+    numStates = len(states)
+    tm = lil_matrix((numStates, numStates))
+    
+    for i in range(numStates):
+        stateigraph = graphs[i]
+        for j in range(i, numStates):
+            if transitionPossible(states[i], states[j]):
+                prob = 1.0
+                for k in differingDigits(states[i], states[j]):
+                    prob *= forcedProb_Directed(stateigraph, k)
+                for m in sameZeros(states[i], states[j]):
+                    prob *= (1 - forcedProb_Directed(stateigraph, m))
+                tm[i, j] = prob
+
+    tm[numStates - 1, numStates - 1] = 1.0
+    return tm.tocsr(), time.process_time() - start
 
 def path_binary_states(n):
     results = []
@@ -388,6 +432,19 @@ def propogation_time_solver(tm):
     #return solutions
     return solutions, time.process_time() - start
 
+def propogation_time_solver_sparse(tm):
+    start = time.process_time()
+    size = tm.shape[0]
+    solutions = np.zeros(size)
+    solutions[size - 1] = 0
+
+    for i in range(size - 2, 0, -1):
+        temp = calc_expected_sparse(tm, i, solutions)
+        solutions[i] = temp
+
+    solutions[0] = float('inf')
+    return solutions, time.process_time() - start
+
 def propogation_time_solver_inverse(tm): #This one uses the linalg method outlined in Hogben and Jesse's paper. It's Slow :(
     tm = tm[1:, 1:]
     size = len(tm)
@@ -421,6 +478,24 @@ def can_be_calculated(tm, row, solutions):
             if solutions[i] == 0 and i != row:
                 ans = False
     return ans
+
+def calc_expected_sparse(tm, row, solutions):
+    temp = 0.0
+    diagonal = tm[row, row]
+    coefficient = 1 - diagonal
+
+    if coefficient == 0:
+        return float('inf')
+
+    # Get the non-zero entries in the row
+    row_data = tm.getrow(row)
+    for idx, col in zip(row_data.indices, row_data.data):
+        if idx != row and col != 0:
+            temp += col * (solutions[idx] + 1)
+
+    temp += (1 - coefficient)
+    temp /= coefficient
+    return temp
 
 #generating arrays for zero forcing sets by size of intial set
 
@@ -832,6 +907,31 @@ def create_bidirectional_star_graph():
         directed_graph.add_edge(v, u)
     return directed_graph
 
+def create_bidirectional_spider_graph(leg_length_sets):
+    G = nx.Graph()
+    G.add_node(0)
+    index = 1
+    for leg_length in leg_length_sets:
+        G.add_node(index)
+        G.add_edge(0, index)
+        for i in range(index+1, index + leg_length):
+            G.add_node(i)
+            G.add_edge(i - 1, i)
+        index += leg_length
+    directed_graph = nx.DiGraph(G)
+    return directed_graph
+
+def create_bidirectional_complete_binary_tree():
+    G = nx.Graph()
+    for i in range(n):
+        left = 2*i + 1
+        right = 2*i + 2
+        if left < n:
+            G.add_edge(i, left)
+        if right < n:
+            G.add_edge(i, right)
+    return nx.to_directed(G)
+
 def all_nodes_blue(graph):
     return all(data.get('color') == 'blue' for _, data in graph.nodes(data=True))
 
@@ -861,6 +961,62 @@ def rzf_simulation(targetGraph, startingSet):
             graph.nodes[node]['color'] = 'blue'
     return iterations
 
+def rzf_simulation_all_nodes(targetGraph, trials_per_node):
+    results = []
+    for i in targetGraph.nodes():
+        avg = 0
+        for _ in range(trials_per_node):
+            iterations = rzf_simulation_weighted(targetGraph, [i])
+            avg += iterations
+        avg /= trials_per_node
+        results.append((i, avg))
+    return results            
+
+def rzf_simulation_weighted(G, starting_set, weight_attr='weight',
+                            seed=None, max_steps=1_000_000):
+
+    rng = random.Random(seed)
+    graph = G.copy()
+
+    start_set = set(starting_set) & set(graph.nodes)
+    for v in graph.nodes:
+        graph.nodes[v]['color'] = 'blue' if v in start_set else 'white'
+
+    total_nodes = graph.number_of_nodes()
+
+    def all_blue():
+        return all(graph.nodes[v]['color'] == 'blue' for v in graph.nodes)
+
+    iterations = 0
+    while not all_blue():
+        iterations += 1
+        if iterations > max_steps:
+            raise RuntimeError("Reached max_steps without all nodes turning blue.")
+
+        turned_blue = []
+        for v in graph.nodes:
+            if graph.nodes[v]['color'] == 'blue':
+                continue
+
+            total_w = 0.0
+            blue_w  = 0.0
+            for u, _, data in graph.in_edges(v, data=True):
+                w = data.get(weight_attr, 1.0)
+                total_w += w
+                if graph.nodes[u]['color'] == 'blue':
+                    blue_w += w
+
+            if total_w <= 0.0:
+                continue  # no incoming edges => zero prob this round
+
+            if rng.random() <= blue_w / total_w:
+                turned_blue.append(v)
+
+        for v in turned_blue:
+            graph.nodes[v]['color'] = 'blue'
+
+    return iterations
+
 def create_connected_random_directed_graph(probability=0.5):
     G = nx.gnp_random_graph(n, probability, directed=True)
     while not nx.is_strongly_connected(G):
@@ -882,380 +1038,298 @@ def pad_top_left_with_one(matrix):
 
     return padded
 
-trials = 10
-numbers = range(4, 40)
-offset = min(numbers)  # Adjust index offset
-dptimes = np.zeros(len(numbers))
-invtimes = np.zeros(len(numbers))
-tmgentimes = np.zeros(len(numbers))
+def pad_top_left_with_one_sparse(matrix):
+    matrix = matrix.tocsr()
+    rows, cols = matrix.shape
 
-output_file = "/Users/noah01px2019/Desktop/ept_calculation_times.txt"
-
-with open(output_file, "w") as f:
-    f.write("n,TM_Generation_Time,Back_Substitution_Time,Inverse_Method_Time\n")
-
-for i in numbers:
-    index = i - offset  # Adjusted index
-    n = i
-    G = create_bidirectional_path_graph()
-    states = path_binary_states(n)
-    graphs = graph_gen_sub(G,states)
-    for j in range(trials):
-        tm, tmtime = tm_generation_directed_sub(graphs, states)
-        tm = pad_top_left_with_one(tm)
-        tmgentimes[index] += tmtime
-        tttime = propogation_time_solver(tm)[1]
-        tt2time = propogation_time_solver_inverse(tm)[1]
-        dptimes[index] += tttime
-        invtimes[index] += tt2time
-
-    tmgentimes[index] /= trials
-    dptimes[index] /= trials
-    invtimes[index] /= trials
-
-    # Save results to the file after each iteration
-    with open(output_file, "a") as f:
-        f.write(f"{n},{tmgentimes[index]},{dptimes[index]},{invtimes[index]}\n")
-
-
-
-n = 7
-G = create_bidirectional_path_graph()
-states = path_binary_states(n)
-graphs = graph_gen_sub(G, states)
-tm = tm_generation_directed_sub(graphs,states)[0]
-tm = pad_top_left_with_one(tm)
-tttime = propogation_time_solver_inverse(tm)[0]
-print(tttime[1])
-
-
-
-
-
-
-while True:
-    i = 1
-
-
-
-
-
-n = 5
-G = create_bidirectional_complete_graph()
-graphs = graph_gen(G)
-tm = tm_generation_directed(graphs)[0]
-print(tm)
-tt1 = propogation_time_solver(tm)
-tt2 = propogation_time_solver_inverse(tm)
-print(tt1)
-print(tt2)
-
-
-
-trials = 1
-numbers = range(4, 30)
-offset = min(numbers)  # Adjust index offset
-dptimes = np.zeros(len(numbers))
-invtimes = np.zeros(len(numbers))
-tmgentimes = np.zeros(len(numbers))
-
-output_file = "/Users/noah01px2019/Desktop/ept_calculation_times.txt"
-
-with open(output_file, "w") as f:
-    f.write("n,TM_Generation_Time,Back_Substitution_Time,Inverse_Method_Time\n")
-
-for i in numbers:
-    index = i - offset  # Adjusted index
-    n = i
-    for j in range(trials):
-        G = nx.erdos_renyi_graph(n, 0.5)
-        while not nx.is_connected(G):
-            G = nx.erdos_renyi_graph(n, 0.5)
-        
-        graphs = graph_gen(G)
-        tm, tmtime = tm_generation(graphs)
-        tmgentimes[index] += tmtime
-        tttime = propogation_time_solver(tm)
-        tt2time = propogation_time_solver_inverse(tm)
-        dptimes[index] += tttime
-        invtimes[index] += tt2time
-
-    tmgentimes[index] /= trials
-    dptimes[index] /= trials
-    invtimes[index] /= trials
-
-    # Save results to the file after each iteration
-    with open(output_file, "a") as f:
-        f.write(f"{n},{tmgentimes[index]},{dptimes[index]},{invtimes[index]}\n")
-
-
-
-
-for i in range(3,15):
-    n = 2+i
-    G = create_bidirectional_complete_bipartite_graph(2,n-2)
-    tt = return_transition_times(G)
-    print("For n = " + str(n) + ", the expected propogation time is " + str(tt[1]) + " iterations")
-
-
-
-
-
-
-n = 10
-G = create_bidirectional_complete_graph()
-graphs = graph_gen(G)
-tm = tm_generation_directed(graphs)
-tt = propogation_time_solver(tm)
-print(tt[1])
-
-
-
-n = 10
-G = create_bidirectional_complete_graph()
-graphs = graph_gen(G)
-tm = tm_generation_directed(graphs)
-print(tm)
-start = time.time()
-transitionTimes = propogation_time_solver(tm)
-finish = time.time()
-print(transitionTimes)
-
-
-
-        
-
-
-n = 14
-G = nx.complete_graph(n)
-graphs = graph_gen(G)
-tm = tm_generation(graphs)
-tt = propogation_time_solver(tm)
-print(tt[1])
-
-
-
-
-
-
-trials = 1000
-
-centrality_measures = {
-    'Degree Centrality': nx.degree_centrality,
-    'Betweenness Centrality': nx.betweenness_centrality,
-    'Closeness Centrality': nx.closeness_centrality,
-    'Eigenvector Centrality': nx.eigenvector_centrality
-}
-
-frequencies = {name: np.zeros(11) for name in centrality_measures}
-
-for i in tqdm(range(trials), desc="Calculating centralities"):
-    n = 11
-    G = create_connected_random_directed_graph(0.5)
-    tt = return_transition_times(G)
-    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-    minin_node = np.argmin(tt[zfs_size_one_indices])
+    # Create top row and left column with a single 1 at (0,0)
+    top_row = csr_matrix(([1.0], ([0], [0])), shape=(1, cols + 1))
+    left_col = csr_matrix((rows, 1))
     
-    for centrality_name, centrality_func in centrality_measures.items():
-        centrality = centrality_func(G)
-        centrality_ranking = sorted(centrality, key=centrality.get, reverse=True)
-        centrality_index = centrality_ranking.index(minin_node)
-        frequencies[centrality_name][centrality_index] += 1
+    # Append column and row
+    bottom = hstack([left_col, matrix])
+    padded = vstack([top_row, bottom])
 
-for centrality_name, frequency in frequencies.items():
-    plt.bar(range(len(frequency)), frequency)
-    plt.xlabel('Centrality Ranking')
-    plt.ylabel('Frequency')
-    plt.title(f'Frequency of Minimum Propagation Time Node by {centrality_name}')
-    plt.savefig(f"/Users/noah01px2019/Desktop/{centrality_name.replace(' ', '_')}.png")
-    plt.close()
+    return padded.tocsr()
 
+def plot():
+    input_file = "/Users/noah01px2019/Desktop/Results/eptplot.txt"
 
+    # Load the data, skipping the header
+    data = np.loadtxt(input_file, delimiter=",", skiprows=1)
 
+    n_vals = data[:, 0].astype(int)
+    tmtimes = data[:, 1]
 
-trials = 100000
-n =10
-G = create_bidirectional_complete_bipartite_graph(2,n-2)
-zfsSet = [1]
-start = time.process_time()
-iterations_count = np.zeros(n+2)
-for i in range(trials):
-    iterations = rzf_simulation(G, zfsSet)
-    iterations_count[iterations] += 1
-print(iterations_count)
-print("Time needed to run simulations = " + str(time.process_time() - start) + " seconds")
-markov_bound = np.zeros(n+2)
-percent_occurence = iterations_count/trials
-for i in range(n+2):
-    prob = sum(percent_occurence[:i])
-    markov_bound[i] = (1-prob)*i
-print(markov_bound)
+    # Compute lengths of path_binary_states(n) for each n
+    x_vals = [len(path_binary_states(n)) for n in n_vals]
 
+    # Plotting
+    plt.figure()
+    plt.plot(x_vals, tmtimes, label="Transition Matrix Generation Time")
+    plt.xlabel("Number of States in Transition Matix")
+    plt.ylabel("Average Time (s)")
+    plt.title("EPT Computation Times vs Transition Matrix Size")
+    plt.grid(True)
+    plt.tight_layout()
+    plt.show()
 
-for i in range(3,12): 
-    n = i
-    G = nx.star_graph(n-1)
-    tt = return_transition_times(G)
-    print("For n = " + str(n) + ", the expected propogation time is " + str(tt[1]) + " iterations")
+def generate_all_graph_families_8_nodes():
+    graphs = {}
+    graphs['barbell'] = nx.barbell_graph(3, 2)
+    graphs['binomial_tree'] = nx.binomial_tree(3)
+    graphs['complete'] = nx.complete_graph(8)
+    graphs['complete_multipartite'] = nx.complete_multipartite_graph(4, 4)
+    graphs['circular_ladder'] = nx.circular_ladder_graph(4)
+    graphs['circulant'] = nx.circulant_graph(8, [1])
+    graphs['cycle'] = nx.cycle_graph(8)
+    graphs['full_rary_tree'] = nx.full_rary_tree(2, 8)
+    graphs['ladder'] = nx.ladder_graph(4)
+    graphs['lollipop'] = nx.lollipop_graph(4, 4)
+    graphs['path'] = nx.path_graph(8)
+    graphs['star'] = nx.star_graph(7)
+    graphs['turan'] = nx.turan_graph(8, 2)
+    graphs['wheel'] = nx.wheel_graph(8)
+    return graphs
 
-for i in range(3,12): #the same! sugoi~!
-    n = i
-    G = create_bidirectional_complete_graph()
-    tt = return_transition_times(G)
-    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-    minin = min(tt[zfs_size_one_indices])
-    print("For n = " + str(n) + ", the minimum expected propogation time is " + str(minin) + " iterations")
+#def generate_all_graph_families_n_nodes(n):
+    graphs = {}
+    graphs['barbell'] = nx.barbell_graph(3, 2)
+    graphs['complete'] = nx.complete_graph(n)
+    graphs['complete_multipartite'] = nx.complete_multipartite_graph(n/2, n/2)
+    graphs['circular_ladder'] = nx.circular_ladder_graph(4)
+    graphs['circulant'] = nx.circulant_graph(8, [1])
+    graphs['cycle'] = nx.cycle_graph(8)
+    graphs['full_rary_tree'] = nx.full_rary_tree(2, 8)
+    graphs['ladder'] = nx.ladder_graph(4)
+    graphs['lollipop'] = nx.lollipop_graph(4, 4)
+    graphs['path'] = nx.path_graph(8)
+    graphs['star'] = nx.star_graph(7)
+    graphs['turan'] = nx.turan_graph(8, 2)
+    graphs['wheel'] = nx.wheel_graph(8)
+    return graphs
 
+def make_bidirectional(G_undirected):
+    G_directed = nx.DiGraph()
+    G_directed.add_nodes_from(G_undirected.nodes())
+    for u, v in G_undirected.edges():
+        G_directed.add_edge(u, v)
+        G_directed.add_edge(v, u)
+    return G_directed
 
+def connected_graphs_with_n_nodes(n):
+    #if n == 8:
+        # For n=8, we can use the preloaded graphs from the file
+        #return eight_node_graphs
+    all_graphs = nx.generators.graph_atlas_g()
+    return [G for G in all_graphs if len(G) == n and nx.is_connected(G)]
 
-for i in range(3,15):
-    n = 2+i
-    G = create_bidirectional_complete_bipartite_graph(2,n-2)
-    tt = return_transition_times(G)
-    print("For n = " + str(n) + ", the expected propogation time is " + str(tt[1]) + " iterations")
+def connected_directed_graphs_with_n_nodes(n):
+    #if n == 8:
+        # For n=8, we can use the preloaded graphs from the file
+        #return eight_node_graphs
+    all_graphs = nx.generators.graph_atlas_g()
+    return [nx.to_directed(G) for G in all_graphs if len(G) == n and nx.is_connected(G)]
 
+def plot_rzf_simulation_results(
+    G,
+    results,
+    pos=None,
+    node_size=350,
+    cmap="viridis",
+    with_labels=True,
+    title=None,
+    vmin=None,
+    vmax=None,
+    ax=None,
+    edge_arrows=None,
+    save_path=None,
+):
+    """
+    Plot a graph with nodes colored by their RZF average iterations.
 
+    Parameters
+    ----------
+    G : networkx.Graph (or DiGraph)
+    results : list[tuple[node, float]]
+        Output of rzf_simulation_all_nodes: [(node, avg_iterations), ...]
+    pos : dict[node] -> (x, y), optional
+        Node positions. If None, uses 'pos' node attribute if present, else spring_layout.
+    node_size : int
+    cmap : str or Colormap
+    with_labels : bool
+    title : str, optional
+    vmin, vmax : float, optional
+        Color scale bounds. If None, inferred from data.
+    ax : matplotlib.axes.Axes, optional
+        Axes to draw on. If None, creates a new one.
+    edge_arrows : bool, optional
+        If None, uses G.is_directed(); otherwise forces on/off.
+    save_path : str, optional
+        If provided, saves the figure to this path.
 
+    Returns
+    -------
+    fig, ax : the matplotlib Figure and Axes used.
+    """
+    # Map results to a dict for quick lookup
+    res_map = dict(results)
 
+    # Build color array in node order; use NaN for missing nodes
+    node_list = list(G.nodes())
+    values = np.array([res_map.get(n, np.nan) for n in node_list], dtype=float)
 
+    # Determine color scale ignoring NaNs
+    finite_vals = values[np.isfinite(values)]
+    if finite_vals.size == 0:
+        raise ValueError("No finite values found in results to color nodes.")
+    if vmin is None:
+        vmin = float(np.nanmin(finite_vals))
+    if vmax is None:
+        vmax = float(np.nanmax(finite_vals))
+    if vmin == vmax:
+        # avoid zero-range color scale
+        vmax = vmin + 1e-9
 
-def markov_tournament(trials):
-    n = 5
-    G = create_bidirectional_complete_bipartite_graph(2,n-2)
-    nums = range(0,10)
-    iterations_count = np.zeros(len(nums))
-    for i in tqdm(range(trials)):
-        iterations = rzf_simulation(G,[1],n)
-        iterations_count[iterations] += 1
-    return iterations_count
+    # Positions
+    if pos is None:
+        # if nodes have 'pos' attribute, use it
+        if all("pos" in G.nodes[n] for n in G.nodes()):
+            pos = {n: G.nodes[n]["pos"] for n in G.nodes()}
+        else:
+            pos = nx.spring_layout(G, seed=42)
 
-print(markov_tournament(100))
+    # Axes
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(8, 6))
+    else:
+        fig = ax.figure
 
+    # Edges
+    if edge_arrows is None:
+        edge_arrows = G.is_directed()
 
-"""minin_values = []
-n_values = range(2,16)
-for i in n_values:
-    n = i
-    G = create_tournament(n)
-    tt = return_transition_times(G)
-    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-    minin = min(tt[zfs_size_one_indices])
-    minin_values.append(minin)
+    # Draw nodes with colormap
+    nodes = nx.draw_networkx_nodes(
+        G,
+        pos,
+        nodelist=node_list,
+        node_size=node_size,
+        node_color=values,
+        cmap=get_cmap(cmap),
+        vmin=vmin,
+        vmax=vmax,
+        ax=ax,
+    )
 
-log2_values = [np.log2(n) for n in n_values]
+    # Draw edges
+    nx.draw_networkx_edges(G, pos, ax=ax, arrows=edge_arrows)
 
-plt.plot(n_values, minin_values, marker='o', linestyle='-', label=r'$\operatorname{ept}_{\mathit{rzf}}(T_n)$')
-plt.plot(n_values, log2_values, marker='s', linestyle='--', label=r'$\log_2(n)$')
+    # Labels
+    if with_labels:
+        nx.draw_networkx_labels(G, pos, font_size=9, ax=ax)
 
-plt.xlabel(r'$n$')
-plt.ylabel(r'$\operatorname{ept}_{\mathit{rzf}}(T_n)$')
-plt.title(r'$\operatorname{ept}_{\mathit{rzf}}(T_n)$ vs $\log_2(n)$')
-plt.legend()
-plt.grid()
+    # Colorbar
+    norm = Normalize(vmin=vmin, vmax=vmax)
+    sm = ScalarMappable(norm=norm, cmap=plt.cm.get_cmap(cmap))
+    sm.set_array([])
+    cbar = fig.colorbar(sm, ax=ax, shrink=0.85, pad=0.02)
+    cbar.set_label("Avg RZF iterations", rotation=90)
+
+    # Title / layout
+    if title:
+        ax.set_title(title)
+    ax.set_axis_off()
+    fig.tight_layout()
+
+    if save_path:
+        fig.savefig(save_path, dpi=300, bbox_inches="tight")
+
+    return fig, ax
+
+n = 9
+G = create_bidirectional_path_graph()
+avgs = rzf_simulation_all_nodes(G, 1000)
+plot_rzf_simulation_results(
+    G,
+    avgs,
+    pos=nx.kamada_kawai_layout(G),
+    title="Average iterations to force (RZF)",
+    cmap="plasma",
+)
 plt.show()
+
+n = 10
+G = create_bidirectional_complete_bipartite_graph(3,7)
+graphs = graph_gen(G)
+tm2 = tm_generation_directed_sparse(graphs)[0]
+ttres2, tttime2 = propogation_time_solver_sparse(tm2)
+zfs_size_one_indices = numswithbitcount(2**n, 1)
+zfs_size_one_times = [(int(math.log2(i)), ttres2[i]) for i in zfs_size_one_indices]
+plot_rzf_simulation_results(
+    G,
+    zfs_size_one_times,
+    pos=nx.kamada_kawai_layout(G),
+    title="EPT for single-node ZFS (Complete Bipartite K3,7)",
+    cmap="plasma",
+)
+plt.show()
+
+
+
+
 """
+n = 103
+G = create_bidirectional_spider_graph([102])
+trials = 100000
 
+data = [rzf_simulation(G, [0]) for _ in range(trials)]
 
-n_values = range(2,14)
-b_values = []
-for i in tqdm(n_values):
-    a = i
-    b = 2
-    n = a+b
-    G = create_bidirectional_complete_bipartite_graph(a,b)
-    tt = return_transition_times(G)
-    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-    bStart = tt[2**(n-1)]
-    b_values.append(bStart)
+# Count frequencies of each outcome
+counts = Counter(data)
+values = np.array(sorted(counts.keys()))
+frequencies = np.array([counts[v] for v in values])
 
-log2_values = [3-(1/2)**n for n in n_values]
+# Fit normal distribution
+mu, sigma = np.mean(data), np.std(data)
 
-plt.plot(n_values, b_values, marker='o', linestyle='-', label=r'$\operatorname{ept}_{\mathit{rzf}}(K_{2,n})$')
-plt.plot(n_values, log2_values, marker='s', linestyle='--', label=r'Lower Bound')
+# Generate smooth curve for PDF
+x = np.linspace(values.min(), values.max(), 500)
+pdf = sc.stats.norm.pdf(x, mu, sigma)
 
-plt.xlabel(r'$n$')
-plt.ylabel(r'$\operatorname{ept}_{\mathit{rzf}}(K_{2,n})$')
-plt.title(r'$\operatorname{ept}_{\mathit{rzf}}(K_{2,n})$ vs Lower Bound')
+# Scale PDF to match the total number of counts
+bin_width = 1  # each outcome is an integer step
+pdf_scaled = pdf * trials * bin_width
+
+# Plot bar chart (counts)
+plt.bar(values, frequencies, edgecolor="black", alpha=0.6, label="Simulation outcomes")
+
+# Plot fitted normal
+plt.plot(x, pdf_scaled, "r-", linewidth=2, label=f"Normal fit (μ={mu:.2f}, σ={sigma:.2f})")
+
+plt.xlabel("Outcome")
+plt.ylabel("Count")
+plt.title("RZF Simulation Outcomes with Normal Fit")
 plt.legend()
-plt.grid()
 plt.show()
 
+for i in range(5,15):
+    n = i 
+    G = create_bidirectional_path_graph()
+    print(G.number_of_nodes())
+    graphs = graph_gen(G)
+    tm = tm_generation_directed_sparse(graphs)[0]
+    ttres, tttime = propogation_time_solver_sparse(tm)
+    print(ttres[1])
+    print(ttres[2**(n-1)+1])
 
-
-
-for i in range(1,10):
-    a = i
-    for j in range(1,i+1):
-        b = j
-        n = a+b
-        G = create_bidirectional_complete_bipartite_graph(a,b)
-        tt = return_transition_times(G)
-        zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-        aStart = tt[1]
-        bStart = tt[2**(n-1)]
-        print("For a = " + str(a) + ", b = " + str(b) + ", the expected propogation time for the first node is " + str(aStart) + " and the expected propogation time for the second node is " + str(bStart))
-        
 
 n = 10
 G = create_bidirectional_complete_bipartite_graph(5,5)
-tt = return_transition_times(G)
-print(tt[0])
+graphs = graph_gen(G)
+tm2 = tm_generation_directed_sparse(graphs)[0]
+ttres2, tttime2 = propogation_time_solver_sparse(tm2)
+print(ttres2)
+"""
 
 
-
-
-
-for i in range(2,5):
-    n = 2**i
-    G = create_bidirectional_hypercube_graph()
-    tt = return_transition_times(G)
-    zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-    minin = min(tt[zfs_size_one_indices])
-    print("For n = " + str(n) + ", the minimum expected propogation time is " + str(minin) + " iterations")
-
-for i in range(5,11):
-    n = 2**i
-    G = create_bidirectional_hypercube_graph()
-    sum = 0
-    zfsSet = [0]
-    start = time.process_time()
-    for i in range(1000):
-        sum += rzf_simulation(G, zfsSet)
-    print("For n = " + str(n) + ", the average number of iterations needed to propogate is " + str(sum/1000) + " iterations")
-    print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
-
-    
-
-
-n = 12
-G = create_bidirectional_sun_graph()
-G.add_edges_from([(0,3),(1,4),(3,0),(4,1),(2,5),(5,2),(4,2),(2,4)]) #it appears that chords within the cycle lower the ezpf
-start = time.process_time()
-tt = return_transition_times(G)
-zfs_size_one_indices = [i for i in range(2**n) if bin(i).count('1') == 1]
-print(tt[zfs_size_one_indices])
-print("Time needed to generate transition times = " + str(time.process_time() - start) + " seconds")
-
-
-"""sum = 0
-zfsSet = [0]
-start = time.process_time()
-for i in range(1000):
-    sum += rzf_simulation(G, zfsSet)
-print(sum)
-print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
-
-#for simulation, track blue nodes and only consider successors to blue nodes"""
-
-
-
-for i in range(5,11):
-    n = 2**i
-    G = create_bidirectional_hypercube_graph()
-    sum = 0
-    zfsSet = [0]
-    start = time.process_time()
-    for i in range(1000):
-        sum += rzf_simulation(G, zfsSet)
-    print("For n = " + str(n) + ", the average number of iterations needed to propogate is " + str(sum/1000) + " iterations")
-    print("Time needed to run 1000 simulations = " + str(time.process_time() - start) + " seconds")
