@@ -11,6 +11,7 @@ from collections import defaultdict
 from matplotlib.cm import get_cmap
 from matplotlib.colors import Normalize
 from matplotlib.cm import ScalarMappable
+from matplotlib.patches import FancyArrowPatch
 import math
 import time
 import itertools
@@ -176,19 +177,19 @@ def forcedProb_Directed(graph, node):
         return 0
     isWeighted = True
     for edge in graph.in_edges(node):
-        if 'weight' not in edge:
+        if 'weight' not in graph.edges[edge]:
             isWeighted = False 
     if not isWeighted:
         return len(blueSuppliers(graph, node))/len(suppliers)
     else:
         weightSum = 0
-        blueWeightSum = 0
+        blueWeightSum = 0 #if blueweightsum is 0, then the prob is 0
         for i in suppliers:
             weight = graph[i][node].get('weight')
             weightSum += weight
-            if graph[i].get('color') == 'blue':
+            if graph.nodes[i]['color'] == 'blue':
                 blueWeightSum += weight
-        return weightSum/blueWeightSum
+        return blueWeightSum/weightSum
 
 def numswithbitcount(max, ones):
     nums = []
@@ -197,8 +198,163 @@ def numswithbitcount(max, ones):
             nums.append(i)
     return nums
 
-def print_graph(graph):
-    nx.draw(graph, with_labels=True, node_color='skyblue', edge_color='gray', node_size=1500, font_size=12)
+    pos = compute_layout(G, seed=seed)
+
+    fig, ax = plt.subplots(figsize=(8, 6), dpi=140)
+
+    nx.draw_networkx_nodes(
+        G, pos, ax=ax,
+        node_color="skyblue", node_size=1200,
+        edgecolors="black", linewidths=0.8
+    )
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=11)
+
+    # Edge widths independent of layout; normalize nicely
+    def ew(d): 
+        return float(d.get("weight", 1.0))
+    edges = list(G.edges(data=True))
+    w = np.array([ew(d) for _,_,d in edges], dtype=float) if edges else np.array([])
+    if w.size and not np.all(w == w[0]):
+        wn = (w - w.min()) / (w.max() - w.min())
+        widths = list(1.5 + 3.5*wn)
+    else:
+        widths = [2.0]*len(edges)
+
+    nx.draw_networkx_edges(
+        G, pos, ax=ax,
+        arrows=G.is_directed(), arrowsize=16, arrowstyle="-|>" if G.is_directed() else "-",
+        connectionstyle="arc3,rad=0.08" if G.is_directed() else "arc3,rad=0.0",
+        width=widths, edge_color="gray", alpha=0.9
+    )
+
+    if show_weights and edges:
+        labels = {(u, v): d.get("weight", "") for u, v, d in edges}
+        nx.draw_networkx_edge_labels(
+            G, pos, ax=ax, edge_labels=labels, font_size=9, font_color="red",
+            bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="none", alpha=0.7)
+        )
+
+    ax.set_axis_off()
+    fig.tight_layout()
+    plt.show()
+
+def print_graph(G):
+    pos = nx.spring_layout(G, seed=42)  # simple spring layout
+    plt.figure(figsize=(6, 4))
+    nx.draw_networkx(
+        G, pos,
+        with_labels=True,
+        node_color='skyblue',
+        edge_color='gray',
+        node_size=1500,
+        font_size=12
+    )
+    edge_labels = {(u, v): d.get('weight', '') for u, v, d in G.edges(data=True)}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=edge_labels, font_color='red')
+    plt.axis('off')
+    plt.show()
+
+    pos = nx.spring_layout(G, seed=42)
+    plt.figure(figsize=(6, 4))
+
+    # Draw nodes and labels
+    nx.draw_networkx_nodes(G, pos, node_color='skyblue', edgecolors='black', node_size=1500)
+    nx.draw_networkx_labels(G, pos, font_size=12)
+
+    # Separate edges that have a reverse counterpart
+    fwd_edges, back_edges = [], []
+    for u, v in G.edges():
+        if (v, u) in G.edges() and (v, u) not in fwd_edges:
+            fwd_edges.append((u, v))
+            back_edges.append((v, u))
+        elif (v, u) not in G.edges():
+            fwd_edges.append((u, v))
+
+    # Draw curved arrows for both directions
+    nx.draw_networkx_edges(
+        G, pos,
+        edgelist=fwd_edges,
+        arrows=True, arrowsize=16, connectionstyle="arc3,rad=0.2",
+        edge_color='gray'
+    )
+    nx.draw_networkx_edges(
+        G, pos,
+        edgelist=back_edges,
+        arrows=True, arrowsize=16, connectionstyle="arc3,rad=-0.2",
+        edge_color='gray'
+    )
+
+    # Edge labels for both directions, placed differently
+    labels_fwd  = {(u, v): G[u][v].get('weight', '') for (u, v) in fwd_edges}
+    labels_back = {(u, v): G[u][v].get('weight', '') for (u, v) in back_edges}
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels_fwd,  label_pos=0.3, font_color='red')
+    nx.draw_networkx_edge_labels(G, pos, edge_labels=labels_back, label_pos=0.7, font_color='red')
+
+    plt.axis('off')
+    plt.tight_layout()
+    plt.show()
+
+def print_graph_bidirectional(G):
+    # Ensure directed so A->B and B->A are distinct
+    if not G.is_directed():
+        G = nx.DiGraph(G)
+
+    pos = nx.spring_layout(G, seed=42, k=0.8)
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    nx.draw_networkx_nodes(G, pos, ax=ax, node_color='skyblue',
+                           edgecolors='black', node_size=1200, linewidths=0.8)
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=12)
+
+    # helper to draw one curved arrow u->v
+    def curved_arrow(u, v, rad):
+        a = FancyArrowPatch(pos[u], pos[v],
+                            connectionstyle=f"arc3,rad={rad}",
+                            arrowstyle='-|>', mutation_scale=16,
+                            lw=1.8, color='gray',
+                            shrinkA=18, shrinkB=18,   # keep arrowheads off node centers
+                            zorder=3, clip_on=False)
+        ax.add_patch(a)
+
+    # draw singles straight; pairs curved in opposite directions
+    seen = set()
+    singles = []
+    for u, v in G.edges():
+        if (u, v) in seen:
+            continue
+        if G.has_edge(v, u):
+            curved_arrow(u, v,  0.25)
+            curved_arrow(v, u,  0.25)
+            seen.add((u, v)); seen.add((v, u))
+        else:
+            singles.append((u, v))
+            seen.add((u, v))
+
+    # draw single-direction edges as straight arrows (small curvature 0)
+    for u, v in singles:
+        curved_arrow(u, v, 0.0)
+
+    # edge labels for both directions at different positions
+    # (works even though we drew edges manually; labels use node positions)
+    labels_fwd  = {(u, v): G[u][v].get('weight', '') for (u, v) in G.edges() if G.has_edge(v, u)}
+    labels_back = {(v, u): G[v][u].get('weight', '') for (u, v) in G.edges() if G.has_edge(v, u)}
+    if labels_fwd:
+        nx.draw_networkx_edge_labels(G, pos, ax=ax, edge_labels=labels_fwd,
+                                     label_pos=0.33, font_color='red',
+                                     bbox=dict(fc='white', ec='none', alpha=0.7))
+        nx.draw_networkx_edge_labels(G, pos, ax=ax, edge_labels=labels_back,
+                                     label_pos=0.67, font_color='red',
+                                     bbox=dict(fc='white', ec='none', alpha=0.7))
+
+    # labels for single edges
+    singles_labels = {(u, v): G[u][v].get('weight', '') for (u, v) in singles}
+    if singles_labels:
+        nx.draw_networkx_edge_labels(G, pos, ax=ax, edge_labels=singles_labels,
+                                     label_pos=0.5, font_color='red',
+                                     bbox=dict(fc='white', ec='none', alpha=0.7))
+
+    ax.set_axis_off()
+    fig.tight_layout()
     plt.show()
 
 def save_graph_radius_ver(graph, radius, node, time, name):
@@ -1247,6 +1403,71 @@ def plot_rzf_simulation_results(
 
     return fig, ax
 
+n = 8
+G = create_bidirectional_path_graph()
+for edge in G.edges():
+    G.edges[edge]['weight'] = random.randint(1, 10)
+for node in G.nodes():
+    in_edges = list(G.in_edges(node, data=True))
+    weights = [data.get('weight', 1.0) for _, _, data in in_edges]
+    print(weights)
+left_in_edge_ratios_sum = []
+right_in_edge_ratios_sum = []
+for i in range(1,n-1):
+    left_in_edge_ratio = G.edges[(i-1, i)]['weight'] /(G.edges[(i+1, i)]['weight'] + G.edges[(i-1, i)]['weight'])
+    right_in_edge_ratio = G.edges[(i+1, i)]['weight'] / (G.edges[(i-1, i)]['weight'] + G.edges[(i+1, i)]['weight'])
+    left_in_edge_ratios_sum.append(1/left_in_edge_ratio)
+    right_in_edge_ratios_sum.append(1/right_in_edge_ratio)
+
+print("Left in-edge ratios: " + str(left_in_edge_ratios_sum))
+print("Right in-edge ratios: " + str(right_in_edge_ratios_sum))
+leftplusright = []
+leftminusright = []
+for i in range(0,n):
+    leftplusright.append(sum(right_in_edge_ratios_sum[:i]) + sum(left_in_edge_ratios_sum[i:]))
+    leftminusright.append(abs(sum(right_in_edge_ratios_sum[:i]) - sum(left_in_edge_ratios_sum[i:])))
+print(leftplusright)
+print(leftminusright)
+graphs = graph_gen(G)
+tm2 = tm_generation_directed_sparse(graphs)[0]
+ttres2, tttime2 = propogation_time_solver_sparse(tm2)
+zfs_size_one_indices = numswithbitcount(2**n, 1)
+zfs_size_one_times = [(int(math.log2(i)), ttres2[i]) for i in zfs_size_one_indices]
+min_index = min(range(len(zfs_size_one_times)), key=lambda idx: zfs_size_one_times[idx][1])
+print(min_index)
+min_node, min_time = zfs_size_one_times[min_index]
+print(min_node)
+
+min_sum_index = leftminusright.index(min(leftminusright))
+print(min_sum_index)
+print(zfs_size_one_times)
+
+"""
+ratios = []
+for node in G.nodes():
+    in_edges = list(G.in_edges(node, data=True))
+    weights = [data.get('weight', 1.0) for _, _, data in in_edges]
+    if len(weights) < 2:
+        ratios.append(None)  # Not enough in-edges to compute a ratio
+    else:
+        high = max(weights)
+        low = min(weights)
+        if low == 0:
+            ratios.append(float('inf'))  # Avoid division by zero
+        else:
+            ratios.append(high / low)
+print(ratios)
+"""
+graphs = graph_gen(G)
+tm2 = tm_generation_directed_sparse(graphs)[0]
+ttres2, tttime2 = propogation_time_solver_sparse(tm2)
+zfs_size_one_indices = numswithbitcount(2**n, 1)
+print(ttres2[zfs_size_one_indices])
+
+
+
+
+
 n = 9
 G = create_bidirectional_path_graph()
 avgs = rzf_simulation_all_nodes(G, 1000)
@@ -1260,7 +1481,7 @@ plot_rzf_simulation_results(
 plt.show()
 
 n = 10
-G = create_bidirectional_complete_bipartite_graph(3,7)
+G = create_connected_random_directed_graph()
 graphs = graph_gen(G)
 tm2 = tm_generation_directed_sparse(graphs)[0]
 ttres2, tttime2 = propogation_time_solver_sparse(tm2)
@@ -1270,8 +1491,8 @@ plot_rzf_simulation_results(
     G,
     zfs_size_one_times,
     pos=nx.kamada_kawai_layout(G),
-    title="EPT for single-node ZFS (Complete Bipartite K3,7)",
-    cmap="plasma",
+    title="EPT for Graph by starting node",
+    cmap="RdYlGn",
 )
 plt.show()
 
