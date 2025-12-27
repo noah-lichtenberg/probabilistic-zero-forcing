@@ -17,6 +17,8 @@ import time
 import itertools
 import random
 import os
+from readrda import BEAinputoutputdata
+
 
 def largerBin_old(num): #Given a decimal integer, returns a supersetof all possible states that it can reach in one iteration
     nums = []
@@ -1402,6 +1404,68 @@ def plot_rzf_simulation_results(
         fig.savefig(save_path, dpi=300, bbox_inches="tight")
 
     return fig, ax
+
+n = 15
+G = BEAinputoutputdata
+graphs = graph_gen(G)
+tm2 = tm_generation_directed_sparse(graphs)[0]
+print("solving")
+ttres2, tttime2 = propogation_time_solver_sparse(tm2)
+zfs_size_one_indices = numswithbitcount(2**n, 1)
+zfs_size_one_times = [(int(math.log2(i)), ttres2[i]) for i in zfs_size_one_indices]
+min_index = min(range(len(zfs_size_one_times)), key=lambda idx: zfs_size_one_times[idx][1])
+print(zfs_size_one_times)
+
+def plot_graph_with_zfs_heatmap(G, zfs_size_one_times):
+    # Turn list of (node, time) into a dict
+    times = {node: t for node, t in zfs_size_one_times}
+
+    # Extract times for all nodes in G, in node order
+    nodes = list(G.nodes())
+    node_values = [times[node] for node in nodes]
+
+    # Handle normalization (in case you want to avoid infinities/NaNs)
+    finite_vals = [v for v in node_values if np.isfinite(v)]
+    vmin, vmax = min(finite_vals), max(finite_vals)
+
+    pos = nx.spring_layout(G, seed=42)  # or any other layout you like
+
+    plt.figure(figsize=(8, 6))
+
+    # Draw edges
+    nx.draw_networkx_edges(
+        G, pos,
+        alpha=0.3,
+        arrows=True,
+        arrowstyle='->',
+        connectionstyle="arc3,rad=0.05"
+    )
+
+    # Draw nodes with heatmap coloring
+    node_collection = nx.draw_networkx_nodes(
+        G, pos,
+        nodelist=nodes,
+        node_color=node_values,
+        cmap=plt.cm.viridis,
+        vmin=vmin, vmax=vmax
+    )
+
+    # Draw integer labels (0..n-1)
+    nx.draw_networkx_labels(G, pos, font_size=10)
+
+    # Colorbar
+    cbar = plt.colorbar(node_collection)
+    cbar.set_label("ZFS propagation time from singleton start")
+
+    plt.axis("off")
+    plt.tight_layout()
+    plt.show()
+
+plot_graph_with_zfs_heatmap(G, zfs_size_one_times)
+
+while True:
+    x =1 
+
 
 n = 8
 G = create_bidirectional_path_graph()
