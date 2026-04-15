@@ -1,2 +1,4 @@
 # probabilistic-zero-forcing
 Python script for finding the expected propagation time for a given graph and starting set using a Markov Chain approach. The graph can be set as any graph object in NetworkX. Currently, the script will display one of the zero forcing sets of the specified size with the minimum expected propogation time, but this can be easily changed. As of now, the script can reliably be ran on graphs under 15 vertices in a reasonable amount of time, and so future changes may involve pruning and changing the calculation algorithm for graphs with a more specific structure. 
+
+Code was used in original RZF paper. To replicate results on the BEA graph data, run bea_driver.py.
